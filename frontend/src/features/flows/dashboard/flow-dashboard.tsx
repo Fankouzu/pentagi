@@ -140,7 +140,7 @@ const StatusBadge = ({ status }: { status: PentestStatus }) => {
     const Icon = config.icon;
 
     return (
-        <Badge className={`gap-1.5 px-3 py-1.5 text-sm ${config.className}`}>
+        <Badge className={`gap-1.5 px-2 py-0.5 text-sm ${config.className}`}>
             <Icon className="size-4" />
             {config.label}
         </Badge>

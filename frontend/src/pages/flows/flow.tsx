@@ -19,6 +19,7 @@ import { SidebarTrigger } from '@/components/ui/sidebar';
 import FlowCentralTabs from '@/features/flows/flow-central-tabs';
 import FlowTabs from '@/features/flows/flow-tabs';
 import { useBreakpoint } from '@/hooks/use-breakpoint';
+import { useFlowTabDetection } from '@/hooks/use-flow-tab-detection';
 import { Log } from '@/lib/log';
 import { copyToClipboard, downloadTextFile, generateFileName, generateReport } from '@/lib/report';
 import { formatName } from '@/lib/utils/format';
@@ -154,15 +155,21 @@ const Flow = () => {
         }
     }, [flowError, flowData, isFlowLoading, navigate]);
 
-    // State for preserving active tabs when switching flows
-    const [activeTabsTab, setActiveTabsTab] = useState<string>(!isDesktop ? 'automation' : 'terminal');
+    // Desktop: side panel defaults to 'terminal'
+    const [desktopTabsTab, setDesktopTabsTab] = useState<string>('terminal');
+
+    // Mobile: use the same auto-detection logic as FlowCentralTabs
+    const { handleTabChange: handleMobileTabChange, resolvedTab: mobileAutoTab } = useFlowTabDetection();
+
+    const activeTabsTab = isDesktop ? desktopTabsTab : mobileAutoTab;
+    const handleTabsTabChange = isDesktop ? setDesktopTabsTab : handleMobileTabChange;
 
     const tabsCard = (
         <div className="flex h-[calc(100dvh-3rem)] max-w-full flex-col rounded-none border-0">
             <div className="flex-1 overflow-auto py-4 pr-0 pl-4">
                 <FlowTabs
                     activeTab={activeTabsTab}
-                    onTabChange={setActiveTabsTab}
+                    onTabChange={handleTabsTabChange}
                 />
             </div>
         </div>

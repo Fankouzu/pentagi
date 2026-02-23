@@ -384,3 +384,131 @@ export const VULNERABILITY_SEVERITY_UPDATED_SUBSCRIPTION = gql`
         }
     }
 `;
+
+export const FULL_ATTACK_CHAIN_UPDATED_SUBSCRIPTION = gql`
+    subscription FullAttackChainUpdated($groupId: String!) {
+        fullAttackChainUpdated(groupId: $groupId) {
+            ...GraphDataFields
+        }
+    }
+    ${GRAPH_DATA_FRAGMENT}
+`;
+
+export const CREDENTIALS_STATUS_UPDATED_SUBSCRIPTION = gql`
+    subscription CredentialsStatusUpdated($groupId: String!) {
+        credentialsStatusUpdated(groupId: $groupId) {
+            status
+            count
+            examples
+        }
+    }
+`;
+
+export const ACCESS_DETAILS_UPDATED_SUBSCRIPTION = gql`
+    subscription AccessDetailsUpdated($groupId: String!) {
+        accessDetailsUpdated(groupId: $groupId) {
+            access
+            account
+            host
+            service
+            summary
+        }
+    }
+`;
+
+export const HOSTS_WITH_SERVICES_UPDATED_SUBSCRIPTION = gql`
+    subscription HostsWithServicesUpdated($groupId: String!) {
+        hostsWithServicesUpdated(groupId: $groupId) {
+            host
+            ports
+            services
+        }
+    }
+`;
+
+export const OPEN_PORTS_UPDATED_SUBSCRIPTION = gql`
+    subscription OpenPortsUpdated($groupId: String!) {
+        openPortsUpdated(groupId: $groupId) {
+            port
+            service
+            host
+        }
+    }
+`;
+
+export const ALL_CVES_UPDATED_SUBSCRIPTION = gql`
+    subscription AllCvesUpdated($groupId: String!) {
+        allCvesUpdated(groupId: $groupId) {
+            cve
+            foundOn
+            source
+        }
+    }
+`;
+
+export const EXPLOIT_ATTEMPTS_UPDATED_SUBSCRIPTION = gql`
+    subscription ExploitAttemptsUpdated($groupId: String!) {
+        exploitAttemptsUpdated(groupId: $groupId) {
+            vulnerability
+            attemptCount
+            status
+        }
+    }
+`;
+
+export const TOOL_USAGE_UPDATED_SUBSCRIPTION = gql`
+    subscription ToolUsageUpdated($groupId: String!) {
+        toolUsageUpdated(groupId: $groupId) {
+            tool
+            executions
+        }
+    }
+`;
+
+export const TOOL_EFFECTIVENESS_UPDATED_SUBSCRIPTION = gql`
+    subscription ToolEffectivenessUpdated($groupId: String!) {
+        toolEffectivenessUpdated(groupId: $groupId) {
+            tool
+            executions
+            discoveries
+            discoveryTypes
+        }
+    }
+`;
+
+export const ARTIFACTS_UPDATED_SUBSCRIPTION = gql`
+    subscription ArtifactsUpdated($groupId: String!) {
+        artifactsUpdated(groupId: $groupId) {
+            artifact
+            producedBy
+            summary
+        }
+    }
+`;
+
+export const INFRASTRUCTURE_GRAPH_UPDATED_SUBSCRIPTION = gql`
+    subscription InfrastructureGraphUpdated($groupId: String!) {
+        infrastructureGraphUpdated(groupId: $groupId) {
+            ...GraphDataFields
+        }
+    }
+    ${GRAPH_DATA_FRAGMENT}
+`;
+
+export const ACCESS_CHAIN_GRAPH_UPDATED_SUBSCRIPTION = gql`
+    subscription AccessChainGraphUpdated($groupId: String!) {
+        accessChainGraphUpdated(groupId: $groupId) {
+            ...GraphDataFields
+        }
+    }
+    ${GRAPH_DATA_FRAGMENT}
+`;
+
+export const SHORTEST_PATH_GRAPH_UPDATED_SUBSCRIPTION = gql`
+    subscription ShortestPathGraphUpdated($groupId: String!) {
+        shortestPathGraphUpdated(groupId: $groupId) {
+            ...GraphDataFields
+        }
+    }
+    ${GRAPH_DATA_FRAGMENT}
+`;

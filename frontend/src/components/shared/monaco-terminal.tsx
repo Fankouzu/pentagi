@@ -2,54 +2,36 @@
  * Monaco Terminal Component
  *
  * High-performance terminal log viewer based on Monaco Editor with ANSI color support.
+ * Uses the `anser` library for robust ANSI escape sequence parsing.
  *
- * Supported ANSI SGR codes:
- * - 0: Reset, 1: Bold, 2: Dim, 3: Italic, 4: Underline, 7: Reverse, 9: Strikethrough
- * - 22-29: Reset codes for bold/dim/italic/underline/reverse/strikethrough
- * - 30-37, 90-97: Foreground colors (standard and bright)
- * - 40-47, 100-107: Background colors (standard and bright)
- * - 38;5;N, 48;5;N: 256-color palette (foreground/background)
- * - 38;2;R;G;B, 48;2;R;G;B: True color / 24-bit RGB (foreground/background)
+ * Supported ANSI features (via anser):
+ * - SGR codes: Reset, Bold, Dim, Italic, Underline, Blink, Reverse, Hidden, Strikethrough
+ * - Standard and bright foreground/background colors (30-37, 40-47, 90-97, 100-107)
+ * - 256-color palette (38;5;N, 48;5;N)
+ * - True color / 24-bit RGB (38;2;R;G;B, 48;2;R;G;B)
+ * - Reverse video (proper fg/bg color swap handled by anser)
  *
  * Key optimizations:
- * - Predefined CSS classes instead of dynamic style injection (99.9% fewer DOM elements)
- * - Proper word wrap configuration to prevent 16M pixel containers
+ * - Dynamic CSS class injection with deduplication for color support
  * - IEditorDecorationsCollection for efficient decoration management
  * - Module-level WeakMap cache for parsed logs (avoids re-parsing same logs array)
  * - Memoized content extraction for better React performance
  * - Incremental decoration updates (only decorates new lines)
- * - Direct property checks instead of Object.keys() for style detection
  * - Stable useCallback for mount handler
- * - Dynamic CSS injection for true color support with deduplication
  *
- * @see MONACO_TERMINAL_DOCS.md for detailed best practices and documentation
  * @see https://microsoft.github.io/monaco-editor/docs.html for Monaco API reference
+ * @see https://github.com/IonicaBizau/anser for ANSI parser documentation
  */
 
 import type * as monaco from 'monaco-editor';
 
 import Editor, { type Monaco, type OnMount } from '@monaco-editor/react';
+import Anser from 'anser';
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 
 import { useTheme } from '@/hooks/use-theme';
 import { Log } from '@/lib/log';
 import { cn } from '@/lib/utils';
-
-interface AnsiSegment {
-    endColumn: number;
-    startColumn: number;
-    styles: {
-        backgroundColor?: string;
-        color?: string;
-        dim?: boolean;
-        fontStyle?: string;
-        fontWeight?: string;
-        reverse?: boolean;
-        strikethrough?: boolean;
-        underline?: boolean;
-    };
-    text: string;
-}
 
 interface MonacoTerminalProps {
     className?: string;
@@ -64,416 +46,190 @@ interface MonacoTerminalRef {
 
 interface ParsedLine {
     lineNumber: number;
-    segments: AnsiSegment[];
+    segments: ParsedSegment[];
     text: string;
 }
 
-/**
- * ANSI color codes to CSS colors mapping
- * Maps standard ANSI color codes (30-37, 90-97 for foreground, 40-47, 100-107 for background)
- */
-const ANSI_COLORS = {
-    // Standard colors (30-37)
-    30: '#000000', // Black
-    31: '#ef4444', // Red
-    32: '#22c55e', // Green
-    33: '#eab308', // Yellow
-    34: '#3b82f6', // Blue
-    35: '#a855f7', // Magenta
-    36: '#06b6d4', // Cyan
-    37: '#f5f5f5', // White
-    // Bright colors (90-97)
-    90: '#71717a', // Bright Black (Gray)
-    91: '#f87171', // Bright Red
-    92: '#4ade80', // Bright Green
-    93: '#facc15', // Bright Yellow
-    94: '#60a5fa', // Bright Blue
-    95: '#c084fc', // Bright Magenta
-    96: '#22d3ee', // Bright Cyan
-    97: '#ffffff', // Bright White
-} as const;
+interface ParsedSegment {
+    className: string;
+    endColumn: number;
+    startColumn: number;
+}
 
 /**
- * 256-color palette for extended ANSI colors (38;5;N and 48;5;N)
- * Colors 0-15: Standard + Bright colors
- * Colors 16-231: 6x6x6 color cube
- * Colors 232-255: Grayscale ramp
+ * Set of already injected CSS class names to prevent duplicate style injection.
  */
-const ANSI_256_COLORS: string[] = (() => {
-    const colors: string[] = [];
+const injectedColorClasses = new Set<string>();
 
-    // 0-7: Standard colors
-    colors.push('#000000', '#cd0000', '#00cd00', '#cdcd00', '#0000ee', '#cd00cd', '#00cdcd', '#e5e5e5');
+/**
+ * Converts an RGB string like "187, 0, 0" to a hex string "bb0000".
+ */
+const rgbStringToHex = (rgb: string): string =>
+    rgb
+        .split(',')
+        .map((part) => Math.min(255, Math.max(0, parseInt(part.trim(), 10))).toString(16).padStart(2, '0'))
+        .join('');
 
-    // 8-15: Bright colors
-    colors.push('#7f7f7f', '#ff0000', '#00ff00', '#ffff00', '#5c5cff', '#ff00ff', '#00ffff', '#ffffff');
+/**
+ * Returns the shared style element for dynamic color injection, creating it if needed.
+ */
+const getDynamicStyleElement = (): HTMLStyleElement => {
+    const styleId = 'monaco-terminal-dynamic-colors';
+    let element = document.getElementById(styleId) as HTMLStyleElement | null;
 
-    // 16-231: 6x6x6 color cube
-    const levels: readonly number[] = [0, 95, 135, 175, 215, 255] as const;
-
-    for (let red = 0; red < 6; red++) {
-        for (let green = 0; green < 6; green++) {
-            for (let blue = 0; blue < 6; blue++) {
-                const redValue = (levels[red] ?? 0).toString(16).padStart(2, '0');
-                const greenValue = (levels[green] ?? 0).toString(16).padStart(2, '0');
-                const blueValue = (levels[blue] ?? 0).toString(16).padStart(2, '0');
-
-                colors.push(`#${redValue}${greenValue}${blueValue}`);
-            }
-        }
+    if (!element) {
+        element = document.createElement('style');
+        element.id = styleId;
+        document.head.appendChild(element);
     }
 
-    // 232-255: Grayscale ramp (24 shades)
-    for (let index = 0; index < 24; index++) {
-        const gray = (8 + index * 10).toString(16).padStart(2, '0');
-
-        colors.push(`#${gray}${gray}${gray}`);
-    }
-
-    return colors;
-})();
+    return element;
+};
 
 /**
- * Reverse mapping from CSS color to ANSI code for O(1) lookup.
- * Used when applying decorations to quickly find the ANSI class name.
+ * Ensures a CSS class for the given RGB color exists, injecting it if needed.
+ * Returns the class name.
  */
-const COLOR_TO_ANSI_CODE: Record<string, string> = Object.fromEntries(
-    Object.entries(ANSI_COLORS).map(([code, color]) => [color, code]),
+const ensureColorClass = (prefix: string, rgb: string, cssProperty: string): string => {
+    const hex = rgbStringToHex(rgb);
+    const className = `${prefix}-${hex}`;
+
+    if (!injectedColorClasses.has(className)) {
+        getDynamicStyleElement().textContent += `.${className} { ${cssProperty}: rgb(${rgb}) !important; }\n`;
+        injectedColorClasses.add(className);
+    }
+
+    return className;
+};
+
+/**
+ * Maps anser decoration names to CSS class names.
+ */
+const DECORATION_CLASS_MAP: Record<string, string> = {
+    blink: 'ansi-blink',
+    bold: 'ansi-bold',
+    dim: 'ansi-dim',
+    hidden: 'ansi-hidden',
+    italic: 'ansi-italic',
+    strikethrough: 'ansi-strikethrough',
+    underline: 'ansi-underline',
+};
+
+/**
+ * Static CSS for text decoration and font style classes.
+ */
+const DECORATION_STYLES = [
+    '.ansi-bold { font-weight: bold !important; }',
+    '.ansi-dim { opacity: 0.7 !important; }',
+    '.ansi-italic { font-style: italic !important; }',
+    '.ansi-underline { text-decoration: underline !important; }',
+    '.ansi-strikethrough { text-decoration: line-through !important; }',
+    '.ansi-underline.ansi-strikethrough { text-decoration: underline line-through !important; }',
+    '.ansi-hidden { visibility: hidden !important; }',
+    '.ansi-blink { animation: ansi-blink 1s step-end infinite !important; }',
+    '@keyframes ansi-blink { 50% { opacity: 0; } }',
+].join('\n');
+
+/**
+ * Regex matching ANSI sequences and control characters not handled by anser.
+ * Anser only processes CSI SGR (ESC[...m). This regex matches everything else:
+ * - OSC sequences: ESC ] ... (BEL | ESC \)
+ * - DCS sequences: ESC P ... (ESC \)
+ * - Character set designations: ESC ( X, ESC ) X
+ * - DEC private sequences: ESC # N
+ * - Single-character escape codes: ESC followed by 7,8,D,M,E,H,c,N,O,Z,=,>,<
+ * - Lone ESC not followed by [ (catch-all for any remaining non-CSI escape)
+ * - Non-printable control characters (except \t and \n)
+ */
+const UNSUPPORTED_SEQUENCES_REGEX = new RegExp(
+    [
+        '\\x1b\\][\\s\\S]*?(?:\\x07|\\x1b\\\\)', // OSC: ESC ] ... (BEL | ST)
+        '\\x1bP[\\s\\S]*?\\x1b\\\\', // DCS: ESC P ... ST
+        '\\x1b[()][A-Z0-9]', // Character set: ESC ( X or ESC ) X
+        '\\x1b#[0-9]', // DEC screen alignment: ESC # N
+        '\\x1b[78DMEHcNOZ=>]', // Single-char escape sequences
+        '\\x1b(?!\\[)', // Lone ESC not starting a CSI sequence
+        '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1a\\x1c-\\x1f\\x7f]', // Control chars (keep \t=0x09, \n=0x0a, \r=0x0d; skip ESC=0x1b)
+    ].join('|'),
+    'g',
 );
 
 /**
- * Generate CSS for all possible ANSI color combinations.
- * This creates a fixed set of CSS classes instead of dynamic ones for better performance.
+ * Sanitizes a single line before passing to anser:
+ * 1. Handles carriage returns (\r) — simulates terminal overwrite behavior
+ *    by keeping only content after the last \r on the line
+ * 2. Strips non-SGR escape sequences and control characters
  */
-const generateAnsiStyles = (): string => {
-    const styles: string[] = [];
+const sanitizeTerminalLine = (line: string): string => {
+    // Handle carriage returns: keep only content after the last lone \r
+    // This simulates terminal overwrite (e.g. progress bars)
+    const lastCarriageReturn = line.lastIndexOf('\r');
 
-    // Standard foreground colors (30-37, 90-97)
-    for (const [code, color] of Object.entries(ANSI_COLORS)) {
-        styles.push(`.ansi-fg-${code} { color: ${color} !important; }`);
-    }
+    const withoutCarriageReturns = lastCarriageReturn !== -1 ? line.substring(lastCarriageReturn + 1) : line;
 
-    // Standard background colors (40-47, 100-107)
-    for (const [code, color] of Object.entries(ANSI_COLORS)) {
-        const backgroundCode = parseInt(code) + 10;
-
-        styles.push(`.ansi-bg-${backgroundCode} { background-color: ${color} !important; }`);
-    }
-
-    // 256-color palette (fg-256-N and bg-256-N)
-    for (let index = 0; index < ANSI_256_COLORS.length; index++) {
-        styles.push(`.ansi-fg-256-${index} { color: ${ANSI_256_COLORS[index]} !important; }`);
-        styles.push(`.ansi-bg-256-${index} { background-color: ${ANSI_256_COLORS[index]} !important; }`);
-    }
-
-    // Font styles
-    styles.push(`.ansi-bold { font-weight: bold !important; }`);
-    styles.push(`.ansi-italic { font-style: italic !important; }`);
-    styles.push(`.ansi-dim { opacity: 0.7 !important; }`);
-    styles.push(`.ansi-underline { text-decoration: underline !important; }`);
-    styles.push(`.ansi-strikethrough { text-decoration: line-through !important; }`);
-    styles.push(`.ansi-underline.ansi-strikethrough { text-decoration: underline line-through !important; }`);
-
-    // Reverse video effect (swap foreground and background)
-    // Uses CSS filter to invert colors - works for most cases
-    styles.push(`.ansi-reverse { filter: invert(1) !important; }`);
-
-    return styles.join('\n');
+    return withoutCarriageReturns.replace(UNSUPPORTED_SEQUENCES_REGEX, '');
 };
 
 /**
- * Parses a single line with ANSI escape sequences.
- * Returns the parsed line with segments and plain text.
+ * Parses a single line using anser and returns structured data for Monaco decorations.
+ * Anser handles all ANSI SGR codes including 256-color, true color, and reverse video.
+ * Non-SGR sequences and control characters are stripped before parsing.
  */
 const parseAnsiLine = (line: string, lineNumber: number): ParsedLine => {
     if (!line) {
-        return {
-            lineNumber,
-            segments: [],
-            text: '',
-        };
+        return { lineNumber, segments: [], text: '' };
     }
 
-    const segments: AnsiSegment[] = [];
-    let currentColumn = 1;
-    let currentStyles: AnsiSegment['styles'] = {};
-    let position = 0;
-    let plainText = '';
+    const sanitizedLine = sanitizeTerminalLine(line);
 
-    while (position < line.length) {
-        const charCode = line.charCodeAt(position);
+    if (!sanitizedLine) {
+        return { lineNumber, segments: [], text: '' };
+    }
 
-        // Check for ANSI escape sequence (ESC = 0x1B)
-        if (charCode === 0x1b) {
-            // Save current segment if we have accumulated text
-            if (plainText) {
-                segments.push({
-                    endColumn: currentColumn + plainText.length,
-                    startColumn: currentColumn,
-                    styles: { ...currentStyles },
-                    text: plainText,
-                });
-                currentColumn += plainText.length;
-                plainText = '';
-            }
+    const entries = Anser.ansiToJson(sanitizedLine, { remove_empty: true });
+    const segments: ParsedSegment[] = [];
+    let column = 1;
 
-            position++; // Skip ESC
-
-            if (position < line.length) {
-                const nextChar = line.charAt(position);
-
-                // CSI sequence: ESC [ ... m (SGR - Select Graphic Rendition)
-                if (nextChar === '[') {
-                    position++; // Skip [
-
-                    // Read parameter bytes and final byte
-                    let params = '';
-
-                    while (position < line.length) {
-                        const char = line.charAt(position);
-                        const code = line.charCodeAt(position);
-
-                        // Parameter bytes: 0x30-0x3F (0-9, :, ;, <, =, >, ?)
-                        if (code >= 0x30 && code <= 0x3f) {
-                            params += char;
-                            position++;
-                        }
-                        // Intermediate bytes: 0x20-0x2F (space, !, ", #, $, %, &, ', (, ), *, +, ,, -, ., /)
-                        else if (code >= 0x20 && code <= 0x2f) {
-                            position++;
-                        }
-                        // Final byte: 0x40-0x7E (@, A-Z, [, \, ], ^, _, `, a-z, {, |, }, ~)
-                        else if (code >= 0x40 && code <= 0x7e) {
-                            // Only process 'm' (SGR) commands for styling
-                            if (char === 'm') {
-                                // Parse ANSI codes
-                                const codes = params ? params.split(';').map(Number) : [0];
-                                let codeIndex = 0;
-
-                                while (codeIndex < codes.length) {
-                                    const code = codes[codeIndex];
-
-                                    if (code === 0 || Number.isNaN(code)) {
-                                        // Reset all styles
-                                        currentStyles = {};
-                                    } else if (code === 1) {
-                                        // Bold
-                                        currentStyles.fontWeight = 'bold';
-                                    } else if (code === 2) {
-                                        // Dim/Faint
-                                        currentStyles.dim = true;
-                                    } else if (code === 3) {
-                                        // Italic
-                                        currentStyles.fontStyle = 'italic';
-                                    } else if (code === 4) {
-                                        // Underline
-                                        currentStyles.underline = true;
-                                    } else if (code === 7) {
-                                        // Reverse video
-                                        currentStyles.reverse = true;
-                                    } else if (code === 9) {
-                                        // Strikethrough
-                                        currentStyles.strikethrough = true;
-                                    } else if (code === 22) {
-                                        // Normal intensity (reset bold and dim)
-                                        delete currentStyles.fontWeight;
-                                        delete currentStyles.dim;
-                                    } else if (code === 23) {
-                                        // Not italic
-                                        delete currentStyles.fontStyle;
-                                    } else if (code === 24) {
-                                        // Not underlined
-                                        delete currentStyles.underline;
-                                    } else if (code === 27) {
-                                        // Not reversed
-                                        delete currentStyles.reverse;
-                                    } else if (code === 29) {
-                                        // Not strikethrough
-                                        delete currentStyles.strikethrough;
-                                    } else if (code !== undefined && code >= 30 && code <= 37) {
-                                        // Foreground color
-                                        currentStyles.color = ANSI_COLORS[code as keyof typeof ANSI_COLORS];
-                                    } else if (code === 38) {
-                                        // Extended foreground color
-                                        const nextCode = codes[codeIndex + 1];
-                                        const colorIndexValue = codes[codeIndex + 2];
-
-                                        if (nextCode === 5 && colorIndexValue !== undefined) {
-                                            // 256-color mode: 38;5;N
-                                            if (colorIndexValue >= 0 && colorIndexValue < 256) {
-                                                currentStyles.color = ANSI_256_COLORS[colorIndexValue];
-                                            }
-
-                                            codeIndex += 2; // Skip 5 and N
-                                        } else if (nextCode === 2 && codes[codeIndex + 4] !== undefined) {
-                                            // True color mode: 38;2;R;G;B
-                                            const red = Math.min(255, Math.max(0, codes[codeIndex + 2] ?? 0));
-                                            const green = Math.min(255, Math.max(0, codes[codeIndex + 3] ?? 0));
-                                            const blue = Math.min(255, Math.max(0, codes[codeIndex + 4] ?? 0));
-
-                                            currentStyles.color = `#${red.toString(16).padStart(2, '0')}${green.toString(16).padStart(2, '0')}${blue.toString(16).padStart(2, '0')}`;
-                                            codeIndex += 4; // Skip 2, R, G, B
-                                        }
-                                    } else if (code === 39) {
-                                        // Default foreground color
-                                        delete currentStyles.color;
-                                    } else if (code !== undefined && code >= 40 && code <= 47) {
-                                        // Background color
-                                        const backgroundCode = (code - 10) as keyof typeof ANSI_COLORS;
-
-                                        currentStyles.backgroundColor = ANSI_COLORS[backgroundCode];
-                                    } else if (code === 48) {
-                                        // Extended background color
-                                        const nextCode = codes[codeIndex + 1];
-                                        const colorIndexValue = codes[codeIndex + 2];
-
-                                        if (nextCode === 5 && colorIndexValue !== undefined) {
-                                            // 256-color mode: 48;5;N
-                                            if (colorIndexValue >= 0 && colorIndexValue < 256) {
-                                                currentStyles.backgroundColor = ANSI_256_COLORS[colorIndexValue];
-                                            }
-
-                                            codeIndex += 2; // Skip 5 and N
-                                        } else if (nextCode === 2 && codes[codeIndex + 4] !== undefined) {
-                                            // True color mode: 48;2;R;G;B
-                                            const red = Math.min(255, Math.max(0, codes[codeIndex + 2] ?? 0));
-                                            const green = Math.min(255, Math.max(0, codes[codeIndex + 3] ?? 0));
-                                            const blue = Math.min(255, Math.max(0, codes[codeIndex + 4] ?? 0));
-
-                                            currentStyles.backgroundColor = `#${red.toString(16).padStart(2, '0')}${green.toString(16).padStart(2, '0')}${blue.toString(16).padStart(2, '0')}`;
-                                            codeIndex += 4; // Skip 2, R, G, B
-                                        }
-                                    } else if (code === 49) {
-                                        // Default background color
-                                        delete currentStyles.backgroundColor;
-                                    } else if (code !== undefined && code >= 90 && code <= 97) {
-                                        // Bright foreground color
-                                        currentStyles.color = ANSI_COLORS[code as keyof typeof ANSI_COLORS];
-                                    } else if (code !== undefined && code >= 100 && code <= 107) {
-                                        // Bright background color
-                                        const backgroundCode = (code - 10) as keyof typeof ANSI_COLORS;
-
-                                        currentStyles.backgroundColor = ANSI_COLORS[backgroundCode];
-                                    }
-
-                                    codeIndex++;
-                                }
-                            }
-
-                            position++; // Skip final byte
-
-                            break;
-                        } else {
-                            // Invalid sequence, stop parsing
-                            break;
-                        }
-                    }
-                }
-                // OSC sequence: ESC ] ... (ST or BEL)
-                else if (nextChar === ']') {
-                    position++; // Skip ]
-
-                    // Read until ST (ESC \) or BEL (0x07)
-                    while (position < line.length) {
-                        const code = line.charCodeAt(position);
-
-                        if (code === 0x07) {
-                            // BEL
-                            position++;
-
-                            break;
-                        } else if (code === 0x1b && position + 1 < line.length && line.charAt(position + 1) === '\\') {
-                            // ST (ESC \)
-                            position += 2;
-
-                            break;
-                        }
-
-                        position++;
-                    }
-                }
-                // Other escape sequences: ESC followed by single character
-                else if (nextChar.match(/[78cDEHMNOPVWXZ\\^_=><()]/)) {
-                    position++; // Skip the character
-                } else {
-                    // Unknown escape sequence, skip ESC and continue
-                    // This prevents ESC from appearing in output
-                }
-            } else {
-                // ESC at end of line, skip it
-            }
-
+    for (const entry of entries) {
+        if (!entry.content) {
             continue;
         }
 
-        // Regular character
-        plainText += line[position];
-        position++;
+        const startColumn = column;
+        const endColumn = column + entry.content.length;
+
+        column = endColumn;
+
+        const classNames: string[] = [];
+
+        if (entry.fg) {
+            classNames.push(ensureColorClass('ansi-fg', entry.fg, 'color'));
+        }
+
+        if (entry.bg) {
+            classNames.push(ensureColorClass('ansi-bg', entry.bg, 'background-color'));
+        }
+
+        for (const decoration of entry.decorations) {
+            const decorationClass = DECORATION_CLASS_MAP[decoration];
+
+            if (decorationClass) {
+                classNames.push(decorationClass);
+            }
+        }
+
+        if (classNames.length) {
+            segments.push({
+                className: classNames.join(' '),
+                endColumn,
+                startColumn,
+            });
+        }
     }
 
-    // Add remaining text
-    if (plainText) {
-        segments.push({
-            endColumn: currentColumn + plainText.length,
-            startColumn: currentColumn,
-            styles: { ...currentStyles },
-            text: plainText,
-        });
-    }
+    const text = entries.map((entry) => entry.content).join('');
 
-    // Build plain text for the line
-    const lineText = segments.map((segment) => segment.text).join('');
-
-    return {
-        lineNumber,
-        segments,
-        text: lineText,
-    };
-};
-
-/**
- * Checks if segment has any styles applied.
- * Direct property check is faster than Object.keys().length.
- */
-const hasSegmentStyles = (styles: AnsiSegment['styles']): boolean => {
-    return !!(
-        styles.color ||
-        styles.backgroundColor ||
-        styles.fontWeight ||
-        styles.fontStyle ||
-        styles.underline ||
-        styles.strikethrough ||
-        styles.dim ||
-        styles.reverse
-    );
-};
-
-/**
- * Cache for dynamically injected true color styles.
- * Prevents duplicate style injection for the same color.
- */
-const injectedDynamicStyles = new Set<string>();
-
-/**
- * Injects a dynamic CSS style for true color support.
- * Only injects if the style hasn't been injected before.
- */
-const injectDynamicColorStyle = (className: string, property: string, color: string): void => {
-    if (injectedDynamicStyles.has(className)) {
-        return;
-    }
-
-    const styleId = 'monaco-terminal-dynamic-colors';
-    let styleElement = document.getElementById(styleId) as HTMLStyleElement | null;
-
-    if (!styleElement) {
-        styleElement = document.createElement('style');
-        styleElement.id = styleId;
-        document.head.appendChild(styleElement);
-    }
-
-    styleElement.textContent += `.${className} { ${property}: ${color} !important; }\n`;
-    injectedDynamicStyles.add(className);
+    return { lineNumber, segments, text };
 };
 
 /**
@@ -487,19 +243,16 @@ const parsedLogsCache = new WeakMap<readonly string[], ParsedLine[]>();
  * Returns cached result if the same logs array reference is passed.
  */
 const parseLogsWithCache = (logs: string[]): ParsedLine[] => {
-    // Check cache first
     const cached = parsedLogsCache.get(logs);
 
     if (cached) {
         return cached;
     }
 
-    // Parse all logs
     const allLogsText = logs.join('\n');
     const lines = allLogsText.split('\n');
     const parsedLines = lines.map((line, index) => parseAnsiLine(line, index + 1));
 
-    // Cache the result
     parsedLogsCache.set(logs, parsedLines);
 
     return parsedLines;
@@ -564,14 +317,14 @@ const MonacoTerminal = ({
             wrappingStrategy: 'simple', // Use simple strategy for better performance
         });
 
-        // Inject ANSI CSS styles once (predefined set of classes)
+        // Inject ANSI decoration CSS styles once (static set of classes)
         const ansiStyleId = 'monaco-terminal-ansi-styles';
 
         if (!document.getElementById(ansiStyleId)) {
             const ansiStyleElement = document.createElement('style');
 
             ansiStyleElement.id = ansiStyleId;
-            ansiStyleElement.textContent = generateAnsiStyles();
+            ansiStyleElement.textContent = DECORATION_STYLES;
             document.head.appendChild(ansiStyleElement);
         }
 
@@ -637,7 +390,7 @@ const MonacoTerminal = ({
     // Cache for tracking which lines have been decorated
     const decoratedLinesCountRef = useRef<number>(0);
 
-    // Apply ANSI color decorations incrementally using predefined CSS classes
+    // Apply ANSI color decorations incrementally
     useEffect(() => {
         if (!isEditorReady || !editorRef.current || !monacoRef.current) {
             return;
@@ -674,110 +427,17 @@ const MonacoTerminal = ({
                 }
 
                 for (const segment of line.segments) {
-                    // Use optimized direct property check instead of Object.keys()
-                    if (!hasSegmentStyles(segment.styles)) {
-                        continue;
-                    }
-
-                    // Build CSS class names from predefined classes
-                    const classNames: string[] = [];
-
-                    // Handle foreground color
-                    if (segment.styles.color) {
-                        const colorCode = COLOR_TO_ANSI_CODE[segment.styles.color];
-
-                        if (colorCode) {
-                            // Standard ANSI color
-                            classNames.push(`ansi-fg-${colorCode}`);
-                        } else {
-                            // 256-color or true color - find index in palette
-                            const colorIndex = ANSI_256_COLORS.indexOf(segment.styles.color);
-
-                            if (colorIndex !== -1) {
-                                classNames.push(`ansi-fg-256-${colorIndex}`);
-                            } else {
-                                // True color - inject dynamic style
-                                const dynamicClass = `ansi-fg-${segment.styles.color.replace('#', '')}`;
-
-                                classNames.push(dynamicClass);
-                                injectDynamicColorStyle(dynamicClass, 'color', segment.styles.color);
-                            }
-                        }
-                    }
-
-                    // Handle background color
-                    if (segment.styles.backgroundColor) {
-                        const backgroundColorCode = COLOR_TO_ANSI_CODE[segment.styles.backgroundColor];
-
-                        if (backgroundColorCode) {
-                            // Standard ANSI color
-                            const backgroundCode = parseInt(backgroundColorCode) + 10;
-
-                            classNames.push(`ansi-bg-${backgroundCode}`);
-                        } else {
-                            // 256-color or true color - find index in palette
-                            const colorIndex = ANSI_256_COLORS.indexOf(segment.styles.backgroundColor);
-
-                            if (colorIndex !== -1) {
-                                classNames.push(`ansi-bg-256-${colorIndex}`);
-                            } else {
-                                // True color - inject dynamic style
-                                const dynamicClass = `ansi-bg-${segment.styles.backgroundColor.replace('#', '')}`;
-
-                                classNames.push(dynamicClass);
-                                injectDynamicColorStyle(
-                                    dynamicClass,
-                                    'background-color',
-                                    segment.styles.backgroundColor,
-                                );
-                            }
-                        }
-                    }
-
-                    // Font weight
-                    if (segment.styles.fontWeight === 'bold') {
-                        classNames.push('ansi-bold');
-                    }
-
-                    // Font style
-                    if (segment.styles.fontStyle === 'italic') {
-                        classNames.push('ansi-italic');
-                    }
-
-                    // Dim
-                    if (segment.styles.dim) {
-                        classNames.push('ansi-dim');
-                    }
-
-                    // Underline
-                    if (segment.styles.underline) {
-                        classNames.push('ansi-underline');
-                    }
-
-                    // Strikethrough
-                    if (segment.styles.strikethrough) {
-                        classNames.push('ansi-strikethrough');
-                    }
-
-                    // Reverse video (swap foreground and background)
-                    // Note: Handled via CSS or could be pre-processed in parser
-                    if (segment.styles.reverse) {
-                        classNames.push('ansi-reverse');
-                    }
-
-                    if (classNames.length) {
-                        newDecorations.push({
-                            options: {
-                                inlineClassName: classNames.join(' '),
-                            },
-                            range: new monacoInstance.Range(
-                                line.lineNumber,
-                                segment.startColumn,
-                                line.lineNumber,
-                                segment.endColumn,
-                            ),
-                        });
-                    }
+                    newDecorations.push({
+                        options: {
+                            inlineClassName: segment.className,
+                        },
+                        range: new monacoInstance.Range(
+                            line.lineNumber,
+                            segment.startColumn,
+                            line.lineNumber,
+                            segment.endColumn,
+                        ),
+                    });
                 }
             }
 
@@ -879,8 +539,7 @@ const MonacoTerminal = ({
             // Reset incremental decorations counter
             decoratedLinesCountRef.current = 0;
 
-            // Note: We don't remove ANSI styles or padding styles as they're shared
-            // across all monaco-terminal instances and should persist
+            // Note: We don't remove shared styles as they persist across instances
             // parsedLogsCache uses WeakMap so it's automatically cleaned up
         };
     }, []);

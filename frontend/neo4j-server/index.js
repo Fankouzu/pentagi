@@ -72,10 +72,22 @@ const pubsub = new PubSub();
 const SUBSCRIPTION_EVENTS = {
     DASHBOARD_UPDATED: 'DASHBOARD_UPDATED',
     ATTACK_SURFACE_UPDATED: 'ATTACK_SURFACE_UPDATED',
+    CREDENTIALS_STATUS_UPDATED: 'CREDENTIALS_STATUS_UPDATED',
+    ACCESS_DETAILS_UPDATED: 'ACCESS_DETAILS_UPDATED',
+    HOSTS_WITH_SERVICES_UPDATED: 'HOSTS_WITH_SERVICES_UPDATED',
+    OPEN_PORTS_UPDATED: 'OPEN_PORTS_UPDATED',
+    VULNERABILITY_SEVERITY_UPDATED: 'VULNERABILITY_SEVERITY_UPDATED',
+    ALL_CVES_UPDATED: 'ALL_CVES_UPDATED',
+    EXPLOIT_ATTEMPTS_UPDATED: 'EXPLOIT_ATTEMPTS_UPDATED',
+    TOOL_USAGE_UPDATED: 'TOOL_USAGE_UPDATED',
+    TOOL_EFFECTIVENESS_UPDATED: 'TOOL_EFFECTIVENESS_UPDATED',
+    ARTIFACTS_UPDATED: 'ARTIFACTS_UPDATED',
     MAIN_ATTACK_CHAIN_UPDATED: 'MAIN_ATTACK_CHAIN_UPDATED',
     FULL_ATTACK_CHAIN_UPDATED: 'FULL_ATTACK_CHAIN_UPDATED',
+    INFRASTRUCTURE_GRAPH_UPDATED: 'INFRASTRUCTURE_GRAPH_UPDATED',
+    ACCESS_CHAIN_GRAPH_UPDATED: 'ACCESS_CHAIN_GRAPH_UPDATED',
+    SHORTEST_PATH_GRAPH_UPDATED: 'SHORTEST_PATH_GRAPH_UPDATED',
     ATTACK_PATH_STATS_UPDATED: 'ATTACK_PATH_STATS_UPDATED',
-    VULNERABILITY_SEVERITY_UPDATED: 'VULNERABILITY_SEVERITY_UPDATED',
 };
 
 // Mapping from snapshot key to the subscription event and payload field name.
@@ -83,14 +95,22 @@ const SUBSCRIPTION_EVENTS = {
 const SNAPSHOT_PUBLISH_CONFIG = [
     { key: 'dashboard', event: SUBSCRIPTION_EVENTS.DASHBOARD_UPDATED, field: 'dashboardUpdated' },
     { key: 'attackSurface', event: SUBSCRIPTION_EVENTS.ATTACK_SURFACE_UPDATED, field: 'attackSurfaceUpdated' },
+    { key: 'credentials', event: SUBSCRIPTION_EVENTS.CREDENTIALS_STATUS_UPDATED, field: 'credentialsStatusUpdated' },
+    { key: 'accessDetails', event: SUBSCRIPTION_EVENTS.ACCESS_DETAILS_UPDATED, field: 'accessDetailsUpdated' },
+    { key: 'hosts', event: SUBSCRIPTION_EVENTS.HOSTS_WITH_SERVICES_UPDATED, field: 'hostsWithServicesUpdated' },
+    { key: 'ports', event: SUBSCRIPTION_EVENTS.OPEN_PORTS_UPDATED, field: 'openPortsUpdated' },
+    { key: 'vulnSeverity', event: SUBSCRIPTION_EVENTS.VULNERABILITY_SEVERITY_UPDATED, field: 'vulnerabilitySeverityUpdated' },
+    { key: 'cves', event: SUBSCRIPTION_EVENTS.ALL_CVES_UPDATED, field: 'allCvesUpdated' },
+    { key: 'exploits', event: SUBSCRIPTION_EVENTS.EXPLOIT_ATTEMPTS_UPDATED, field: 'exploitAttemptsUpdated' },
+    { key: 'toolUsage', event: SUBSCRIPTION_EVENTS.TOOL_USAGE_UPDATED, field: 'toolUsageUpdated' },
+    { key: 'toolEffect', event: SUBSCRIPTION_EVENTS.TOOL_EFFECTIVENESS_UPDATED, field: 'toolEffectivenessUpdated' },
+    { key: 'artifacts', event: SUBSCRIPTION_EVENTS.ARTIFACTS_UPDATED, field: 'artifactsUpdated' },
     { key: 'mainChain', event: SUBSCRIPTION_EVENTS.MAIN_ATTACK_CHAIN_UPDATED, field: 'mainAttackChainUpdated' },
     { key: 'fullChain', event: SUBSCRIPTION_EVENTS.FULL_ATTACK_CHAIN_UPDATED, field: 'fullAttackChainUpdated' },
+    { key: 'infraGraph', event: SUBSCRIPTION_EVENTS.INFRASTRUCTURE_GRAPH_UPDATED, field: 'infrastructureGraphUpdated' },
+    { key: 'accessGraph', event: SUBSCRIPTION_EVENTS.ACCESS_CHAIN_GRAPH_UPDATED, field: 'accessChainGraphUpdated' },
+    { key: 'shortestPathData', event: SUBSCRIPTION_EVENTS.SHORTEST_PATH_GRAPH_UPDATED, field: 'shortestPathGraphUpdated' },
     { key: 'pathStats', event: SUBSCRIPTION_EVENTS.ATTACK_PATH_STATS_UPDATED, field: 'attackPathStatsUpdated' },
-    {
-        key: 'vulnSeverity',
-        event: SUBSCRIPTION_EVENTS.VULNERABILITY_SEVERITY_UPDATED,
-        field: 'vulnerabilitySeverityUpdated',
-    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -255,6 +275,89 @@ async function fetchVulnerabilitySeverity(groupId) {
     }));
 }
 
+async function fetchCredentialsStatus(groupId) {
+    const records = await runQuery(credentialsStatus(groupId));
+    return records.map((record) => ({
+        status: record.Status,
+        count: record.Count,
+        examples: record.Examples ?? [],
+    }));
+}
+
+async function fetchAccessDetails(groupId) {
+    const records = await runQuery(validAccessDetails(groupId));
+    return records.map((record) => ({
+        access: record.Access,
+        account: record.Account,
+        host: record.Host,
+        service: record.Service,
+        summary: record.Summary,
+    }));
+}
+
+async function fetchHostsWithServices(groupId) {
+    const records = await runQuery(hostsWithServices(groupId));
+    return records.map((record) => ({
+        host: record.Host,
+        ports: record.Ports ?? [],
+        services: record.Services ?? [],
+    }));
+}
+
+async function fetchOpenPorts(groupId) {
+    const records = await runQuery(openPortsWithServices(groupId));
+    return records.map((record) => ({
+        port: record.Port,
+        service: record.Service,
+        host: record.Host,
+    }));
+}
+
+async function fetchAllCves(groupId) {
+    const records = await runQuery(allCves(groupId));
+    return records.map((record) => ({
+        cve: record.CVE,
+        foundOn: record.FoundOn,
+        source: record.Source,
+    }));
+}
+
+async function fetchExploitAttempts(groupId) {
+    const records = await runQuery(exploitableVulnerabilities(groupId));
+    return records.map((record) => ({
+        vulnerability: record.Vulnerability,
+        attemptCount: record.AttemptCount,
+        status: record.Status,
+    }));
+}
+
+async function fetchToolUsage(groupId) {
+    const records = await runQuery(toolUsageStats(groupId));
+    return records.map((record) => ({
+        tool: record.Tool,
+        executions: record.Executions,
+    }));
+}
+
+async function fetchToolEffectiveness(groupId) {
+    const records = await runQuery(toolEffectiveness(groupId));
+    return records.map((record) => ({
+        tool: record.Tool,
+        executions: record.Executions,
+        discoveries: record.Discoveries,
+        discoveryTypes: record.DiscoveryTypes ?? [],
+    }));
+}
+
+async function fetchArtifacts(groupId) {
+    const records = await runQuery(artifactsProduced(groupId));
+    return records.map((record) => ({
+        artifact: record.Artifact,
+        producedBy: record.ProducedBy,
+        summary: record.Summary,
+    }));
+}
+
 // ---------------------------------------------------------------------------
 // Custom JSON scalar
 // ---------------------------------------------------------------------------
@@ -310,93 +413,22 @@ const resolvers = {
         attackSurface: (_parent, { groupId }) => fetchAttackSurface(groupId),
 
         // Credentials & Access (Q2)
-        credentialsStatus: async (_parent, { groupId }) => {
-            const records = await runQuery(credentialsStatus(groupId));
-            return records.map((record) => ({
-                status: record.Status,
-                count: record.Count,
-                examples: record.Examples ?? [],
-            }));
-        },
-
-        accessDetails: async (_parent, { groupId }) => {
-            const records = await runQuery(validAccessDetails(groupId));
-            return records.map((record) => ({
-                access: record.Access,
-                account: record.Account,
-                host: record.Host,
-                service: record.Service,
-                summary: record.Summary,
-            }));
-        },
+        credentialsStatus: (_parent, { groupId }) => fetchCredentialsStatus(groupId),
+        accessDetails: (_parent, { groupId }) => fetchAccessDetails(groupId),
 
         // Infrastructure (Q3)
-        hostsWithServices: async (_parent, { groupId }) => {
-            const records = await runQuery(hostsWithServices(groupId));
-            return records.map((record) => ({
-                host: record.Host,
-                ports: record.Ports ?? [],
-                services: record.Services ?? [],
-            }));
-        },
-
-        openPorts: async (_parent, { groupId }) => {
-            const records = await runQuery(openPortsWithServices(groupId));
-            return records.map((record) => ({
-                port: record.Port,
-                service: record.Service,
-                host: record.Host,
-            }));
-        },
+        hostsWithServices: (_parent, { groupId }) => fetchHostsWithServices(groupId),
+        openPorts: (_parent, { groupId }) => fetchOpenPorts(groupId),
 
         // Vulnerabilities (Q4)
         vulnerabilitySeverity: (_parent, { groupId }) => fetchVulnerabilitySeverity(groupId),
-
-        allCves: async (_parent, { groupId }) => {
-            const records = await runQuery(allCves(groupId));
-            return records.map((record) => ({
-                cve: record.CVE,
-                foundOn: record.FoundOn,
-                source: record.Source,
-            }));
-        },
-
-        exploitAttempts: async (_parent, { groupId }) => {
-            const records = await runQuery(exploitableVulnerabilities(groupId));
-            return records.map((record) => ({
-                vulnerability: record.Vulnerability,
-                attemptCount: record.AttemptCount,
-                status: record.Status,
-            }));
-        },
+        allCves: (_parent, { groupId }) => fetchAllCves(groupId),
+        exploitAttempts: (_parent, { groupId }) => fetchExploitAttempts(groupId),
 
         // Tools (Q5)
-        toolUsage: async (_parent, { groupId }) => {
-            const records = await runQuery(toolUsageStats(groupId));
-            return records.map((record) => ({
-                tool: record.Tool,
-                executions: record.Executions,
-            }));
-        },
-
-        toolEffectiveness: async (_parent, { groupId }) => {
-            const records = await runQuery(toolEffectiveness(groupId));
-            return records.map((record) => ({
-                tool: record.Tool,
-                executions: record.Executions,
-                discoveries: record.Discoveries,
-                discoveryTypes: record.DiscoveryTypes ?? [],
-            }));
-        },
-
-        artifacts: async (_parent, { groupId }) => {
-            const records = await runQuery(artifactsProduced(groupId));
-            return records.map((record) => ({
-                artifact: record.Artifact,
-                producedBy: record.ProducedBy,
-                summary: record.Summary,
-            }));
-        },
+        toolUsage: (_parent, { groupId }) => fetchToolUsage(groupId),
+        toolEffectiveness: (_parent, { groupId }) => fetchToolEffectiveness(groupId),
+        artifacts: (_parent, { groupId }) => fetchArtifacts(groupId),
 
         // Graph visualizations (Q6)
         mainAttackChain: (_parent, { groupId }) => fetchGraphData(groupId, mainAttackChain),
@@ -426,6 +458,86 @@ const resolvers = {
             resolve: (payload) => payload.attackSurfaceUpdated,
         },
 
+        credentialsStatusUpdated: {
+            subscribe: withFilter(
+                () => pubsub.asyncIterableIterator(SUBSCRIPTION_EVENTS.CREDENTIALS_STATUS_UPDATED),
+                (payload, variables) => payload.groupId === variables.groupId,
+            ),
+            resolve: (payload) => payload.credentialsStatusUpdated,
+        },
+
+        accessDetailsUpdated: {
+            subscribe: withFilter(
+                () => pubsub.asyncIterableIterator(SUBSCRIPTION_EVENTS.ACCESS_DETAILS_UPDATED),
+                (payload, variables) => payload.groupId === variables.groupId,
+            ),
+            resolve: (payload) => payload.accessDetailsUpdated,
+        },
+
+        hostsWithServicesUpdated: {
+            subscribe: withFilter(
+                () => pubsub.asyncIterableIterator(SUBSCRIPTION_EVENTS.HOSTS_WITH_SERVICES_UPDATED),
+                (payload, variables) => payload.groupId === variables.groupId,
+            ),
+            resolve: (payload) => payload.hostsWithServicesUpdated,
+        },
+
+        openPortsUpdated: {
+            subscribe: withFilter(
+                () => pubsub.asyncIterableIterator(SUBSCRIPTION_EVENTS.OPEN_PORTS_UPDATED),
+                (payload, variables) => payload.groupId === variables.groupId,
+            ),
+            resolve: (payload) => payload.openPortsUpdated,
+        },
+
+        vulnerabilitySeverityUpdated: {
+            subscribe: withFilter(
+                () => pubsub.asyncIterableIterator(SUBSCRIPTION_EVENTS.VULNERABILITY_SEVERITY_UPDATED),
+                (payload, variables) => payload.groupId === variables.groupId,
+            ),
+            resolve: (payload) => payload.vulnerabilitySeverityUpdated,
+        },
+
+        allCvesUpdated: {
+            subscribe: withFilter(
+                () => pubsub.asyncIterableIterator(SUBSCRIPTION_EVENTS.ALL_CVES_UPDATED),
+                (payload, variables) => payload.groupId === variables.groupId,
+            ),
+            resolve: (payload) => payload.allCvesUpdated,
+        },
+
+        exploitAttemptsUpdated: {
+            subscribe: withFilter(
+                () => pubsub.asyncIterableIterator(SUBSCRIPTION_EVENTS.EXPLOIT_ATTEMPTS_UPDATED),
+                (payload, variables) => payload.groupId === variables.groupId,
+            ),
+            resolve: (payload) => payload.exploitAttemptsUpdated,
+        },
+
+        toolUsageUpdated: {
+            subscribe: withFilter(
+                () => pubsub.asyncIterableIterator(SUBSCRIPTION_EVENTS.TOOL_USAGE_UPDATED),
+                (payload, variables) => payload.groupId === variables.groupId,
+            ),
+            resolve: (payload) => payload.toolUsageUpdated,
+        },
+
+        toolEffectivenessUpdated: {
+            subscribe: withFilter(
+                () => pubsub.asyncIterableIterator(SUBSCRIPTION_EVENTS.TOOL_EFFECTIVENESS_UPDATED),
+                (payload, variables) => payload.groupId === variables.groupId,
+            ),
+            resolve: (payload) => payload.toolEffectivenessUpdated,
+        },
+
+        artifactsUpdated: {
+            subscribe: withFilter(
+                () => pubsub.asyncIterableIterator(SUBSCRIPTION_EVENTS.ARTIFACTS_UPDATED),
+                (payload, variables) => payload.groupId === variables.groupId,
+            ),
+            resolve: (payload) => payload.artifactsUpdated,
+        },
+
         mainAttackChainUpdated: {
             subscribe: withFilter(
                 () => pubsub.asyncIterableIterator(SUBSCRIPTION_EVENTS.MAIN_ATTACK_CHAIN_UPDATED),
@@ -442,20 +554,36 @@ const resolvers = {
             resolve: (payload) => payload.fullAttackChainUpdated,
         },
 
+        infrastructureGraphUpdated: {
+            subscribe: withFilter(
+                () => pubsub.asyncIterableIterator(SUBSCRIPTION_EVENTS.INFRASTRUCTURE_GRAPH_UPDATED),
+                (payload, variables) => payload.groupId === variables.groupId,
+            ),
+            resolve: (payload) => payload.infrastructureGraphUpdated,
+        },
+
+        accessChainGraphUpdated: {
+            subscribe: withFilter(
+                () => pubsub.asyncIterableIterator(SUBSCRIPTION_EVENTS.ACCESS_CHAIN_GRAPH_UPDATED),
+                (payload, variables) => payload.groupId === variables.groupId,
+            ),
+            resolve: (payload) => payload.accessChainGraphUpdated,
+        },
+
+        shortestPathGraphUpdated: {
+            subscribe: withFilter(
+                () => pubsub.asyncIterableIterator(SUBSCRIPTION_EVENTS.SHORTEST_PATH_GRAPH_UPDATED),
+                (payload, variables) => payload.groupId === variables.groupId,
+            ),
+            resolve: (payload) => payload.shortestPathGraphUpdated,
+        },
+
         attackPathStatsUpdated: {
             subscribe: withFilter(
                 () => pubsub.asyncIterableIterator(SUBSCRIPTION_EVENTS.ATTACK_PATH_STATS_UPDATED),
                 (payload, variables) => payload.groupId === variables.groupId,
             ),
             resolve: (payload) => payload.attackPathStatsUpdated,
-        },
-
-        vulnerabilitySeverityUpdated: {
-            subscribe: withFilter(
-                () => pubsub.asyncIterableIterator(SUBSCRIPTION_EVENTS.VULNERABILITY_SEVERITY_UPDATED),
-                (payload, variables) => payload.groupId === variables.groupId,
-            ),
-            resolve: (payload) => payload.vulnerabilitySeverityUpdated,
         },
     },
 };
@@ -492,16 +620,66 @@ function unregisterGroupForPolling(groupId) {
  * @param {string} groupId
  */
 async function pollGroup(groupId) {
-    const [dashboard, attackSurface, mainChain, fullChain, pathStats, vulnSeverity] = await Promise.all([
+    const [
+        dashboard,
+        attackSurface,
+        credentials,
+        accessDetails,
+        hosts,
+        ports,
+        vulnSeverity,
+        cves,
+        exploits,
+        toolUsage,
+        toolEffect,
+        artifacts,
+        mainChain,
+        fullChain,
+        infraGraph,
+        accessGraph,
+        shortestPathData,
+        pathStats,
+    ] = await Promise.all([
         fetchDashboard(groupId),
         fetchAttackSurface(groupId),
+        fetchCredentialsStatus(groupId),
+        fetchAccessDetails(groupId),
+        fetchHostsWithServices(groupId),
+        fetchOpenPorts(groupId),
+        fetchVulnerabilitySeverity(groupId),
+        fetchAllCves(groupId),
+        fetchExploitAttempts(groupId),
+        fetchToolUsage(groupId),
+        fetchToolEffectiveness(groupId),
+        fetchArtifacts(groupId),
         fetchGraphData(groupId, mainAttackChain),
         fetchGraphData(groupId, fullAttackChain),
+        fetchGraphData(groupId, infrastructureOnly),
+        fetchGraphData(groupId, accessChain),
+        fetchGraphData(groupId, shortestPath),
         fetchAttackPathStats(groupId),
-        fetchVulnerabilitySeverity(groupId),
     ]);
 
-    const fetchedData = { dashboard, attackSurface, mainChain, fullChain, pathStats, vulnSeverity };
+    const fetchedData = {
+        dashboard,
+        attackSurface,
+        credentials,
+        accessDetails,
+        hosts,
+        ports,
+        vulnSeverity,
+        cves,
+        exploits,
+        toolUsage,
+        toolEffect,
+        artifacts,
+        mainChain,
+        fullChain,
+        infraGraph,
+        accessGraph,
+        shortestPathData,
+        pathStats,
+    };
 
     const currentSnapshot = Object.fromEntries(
         Object.entries(fetchedData).map(([key, value]) => [key, JSON.stringify(value)]),
@@ -620,12 +798,12 @@ const wsServer = new WebSocketServer({
 const serverCleanup = useServer(
     {
         schema,
-        onSubscribe: (context, message) => {
-            const groupId = message.payload?.variables?.groupId;
+        onSubscribe: (context, subscriptionId, payload) => {
+            const groupId = payload?.variables?.groupId;
             if (!groupId) return;
 
             const subscriptions = getConnectionSubscriptions(context);
-            subscriptions.set(message.id, groupId);
+            subscriptions.set(subscriptionId, groupId);
 
             const count = (groupSubscriptionCounts.get(groupId) ?? 0) + 1;
             groupSubscriptionCounts.set(groupId, count);
@@ -633,14 +811,14 @@ const serverCleanup = useServer(
             if (pollTimeoutId === null) startPolling();
         },
 
-        onComplete: (context, message) => {
+        onComplete: (context, subscriptionId) => {
             const subscriptions = connectionSubscriptions.get(context.extra);
             if (!subscriptions) return;
 
-            const groupId = subscriptions.get(message.id);
+            const groupId = subscriptions.get(subscriptionId);
             if (!groupId) return;
 
-            subscriptions.delete(message.id);
+            subscriptions.delete(subscriptionId);
             decrementGroupSubscription(groupId);
         },
 

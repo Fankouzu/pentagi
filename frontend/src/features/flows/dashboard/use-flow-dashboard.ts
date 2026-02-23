@@ -1,13 +1,26 @@
-import { useQuery, useSubscription } from '@apollo/client';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useQuery } from '@apollo/client';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { neo4jClient } from './neo4j-client';
 import {
+    ACCESS_CHAIN_GRAPH_UPDATED_SUBSCRIPTION,
+    ACCESS_DETAILS_UPDATED_SUBSCRIPTION,
+    ALL_CVES_UPDATED_SUBSCRIPTION,
+    ARTIFACTS_UPDATED_SUBSCRIPTION,
     ATTACK_PATH_STATS_UPDATED_SUBSCRIPTION,
     ATTACK_SURFACE_UPDATED_SUBSCRIPTION,
+    CREDENTIALS_STATUS_UPDATED_SUBSCRIPTION,
     DASHBOARD_UPDATED_SUBSCRIPTION,
+    EXPLOIT_ATTEMPTS_UPDATED_SUBSCRIPTION,
+    FULL_ATTACK_CHAIN_UPDATED_SUBSCRIPTION,
     FULL_DASHBOARD_QUERY,
+    HOSTS_WITH_SERVICES_UPDATED_SUBSCRIPTION,
+    INFRASTRUCTURE_GRAPH_UPDATED_SUBSCRIPTION,
     MAIN_ATTACK_CHAIN_UPDATED_SUBSCRIPTION,
+    OPEN_PORTS_UPDATED_SUBSCRIPTION,
+    SHORTEST_PATH_GRAPH_UPDATED_SUBSCRIPTION,
+    TOOL_EFFECTIVENESS_UPDATED_SUBSCRIPTION,
+    TOOL_USAGE_UPDATED_SUBSCRIPTION,
     VULNERABILITY_SEVERITY_UPDATED_SUBSCRIPTION,
 } from './neo4j-queries';
 
@@ -169,6 +182,87 @@ interface FullDashboardData {
 }
 
 // ---------------------------------------------------------------------------
+// Subscription-to-query field mappings for real-time updates
+// ---------------------------------------------------------------------------
+
+const SUBSCRIPTION_MAPPINGS: {
+    document: ReturnType<typeof import('@apollo/client').gql>;
+    queryField: keyof FullDashboardData;
+    subscriptionField: string;
+}[] = [
+    { document: DASHBOARD_UPDATED_SUBSCRIPTION, queryField: 'dashboard', subscriptionField: 'dashboardUpdated' },
+    {
+        document: ATTACK_SURFACE_UPDATED_SUBSCRIPTION,
+        queryField: 'attackSurface',
+        subscriptionField: 'attackSurfaceUpdated',
+    },
+    {
+        document: CREDENTIALS_STATUS_UPDATED_SUBSCRIPTION,
+        queryField: 'credentialsStatus',
+        subscriptionField: 'credentialsStatusUpdated',
+    },
+    {
+        document: ACCESS_DETAILS_UPDATED_SUBSCRIPTION,
+        queryField: 'accessDetails',
+        subscriptionField: 'accessDetailsUpdated',
+    },
+    {
+        document: HOSTS_WITH_SERVICES_UPDATED_SUBSCRIPTION,
+        queryField: 'hostsWithServices',
+        subscriptionField: 'hostsWithServicesUpdated',
+    },
+    { document: OPEN_PORTS_UPDATED_SUBSCRIPTION, queryField: 'openPorts', subscriptionField: 'openPortsUpdated' },
+    {
+        document: VULNERABILITY_SEVERITY_UPDATED_SUBSCRIPTION,
+        queryField: 'vulnerabilitySeverity',
+        subscriptionField: 'vulnerabilitySeverityUpdated',
+    },
+    { document: ALL_CVES_UPDATED_SUBSCRIPTION, queryField: 'allCves', subscriptionField: 'allCvesUpdated' },
+    {
+        document: EXPLOIT_ATTEMPTS_UPDATED_SUBSCRIPTION,
+        queryField: 'exploitAttempts',
+        subscriptionField: 'exploitAttemptsUpdated',
+    },
+    { document: TOOL_USAGE_UPDATED_SUBSCRIPTION, queryField: 'toolUsage', subscriptionField: 'toolUsageUpdated' },
+    {
+        document: TOOL_EFFECTIVENESS_UPDATED_SUBSCRIPTION,
+        queryField: 'toolEffectiveness',
+        subscriptionField: 'toolEffectivenessUpdated',
+    },
+    { document: ARTIFACTS_UPDATED_SUBSCRIPTION, queryField: 'artifacts', subscriptionField: 'artifactsUpdated' },
+    {
+        document: MAIN_ATTACK_CHAIN_UPDATED_SUBSCRIPTION,
+        queryField: 'mainAttackChain',
+        subscriptionField: 'mainAttackChainUpdated',
+    },
+    {
+        document: FULL_ATTACK_CHAIN_UPDATED_SUBSCRIPTION,
+        queryField: 'fullAttackChain',
+        subscriptionField: 'fullAttackChainUpdated',
+    },
+    {
+        document: INFRASTRUCTURE_GRAPH_UPDATED_SUBSCRIPTION,
+        queryField: 'infrastructureGraph',
+        subscriptionField: 'infrastructureGraphUpdated',
+    },
+    {
+        document: ACCESS_CHAIN_GRAPH_UPDATED_SUBSCRIPTION,
+        queryField: 'accessChainGraph',
+        subscriptionField: 'accessChainGraphUpdated',
+    },
+    {
+        document: SHORTEST_PATH_GRAPH_UPDATED_SUBSCRIPTION,
+        queryField: 'shortestPathGraph',
+        subscriptionField: 'shortestPathGraphUpdated',
+    },
+    {
+        document: ATTACK_PATH_STATS_UPDATED_SUBSCRIPTION,
+        queryField: 'attackPathStats',
+        subscriptionField: 'attackPathStatsUpdated',
+    },
+];
+
+// ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 
@@ -177,51 +271,47 @@ export function useFlowDashboard(groupId: null | string): FlowDashboardResult {
     const variables = useMemo(() => ({ groupId: groupId ?? '' }), [groupId]);
 
     // Main query — fetches all dashboard data at once
-    const { data, error, loading, refetch } = useQuery<FullDashboardData>(FULL_DASHBOARD_QUERY, {
+    const { data, error, loading, refetch, subscribeToMore } = useQuery<FullDashboardData>(FULL_DASHBOARD_QUERY, {
         client: neo4jClient,
         skip,
         variables,
     });
 
-    // Subscriptions — update data in real time when Neo4j data changes
-    const subscriptionOptions = useMemo(() => ({ client: neo4jClient, skip, variables }), [skip, variables]);
+    // Keep a stable reference to subscribeToMore to avoid re-subscribing on every render.
+    // Apollo Client's useQuery returns a new subscribeToMore reference each render,
+    // which would cause the useEffect to constantly tear down and recreate subscriptions.
+    const subscribeToMoreReference = useRef(subscribeToMore);
 
-    const { data: dashboardUpdate } = useSubscription(DASHBOARD_UPDATED_SUBSCRIPTION, {
-        ...subscriptionOptions,
-        onData: ({ data }) => console.log('[Sub] dashboardUpdated', data.data),
-        onError: (error) => console.error('[Sub] dashboardUpdated error', error),
-    });
+    useEffect(() => {
+        subscribeToMoreReference.current = subscribeToMore;
+    }, [subscribeToMore]);
 
-    const { data: attackSurfaceUpdate } = useSubscription(ATTACK_SURFACE_UPDATED_SUBSCRIPTION, {
-        ...subscriptionOptions,
-        onData: ({ data }) => console.log('[Sub] attackSurfaceUpdated', data.data),
-        onError: (error) => console.error('[Sub] attackSurfaceUpdated error', error),
-    });
-
-    const { data: mainAttackChainUpdate } = useSubscription(MAIN_ATTACK_CHAIN_UPDATED_SUBSCRIPTION, {
-        ...subscriptionOptions,
-        onData: ({ data }) => console.log('[Sub] mainAttackChainUpdated', data.data),
-        onError: (error) => console.error('[Sub] mainAttackChainUpdated error', error),
-    });
-
-    const { data: attackPathStatsUpdate } = useSubscription(ATTACK_PATH_STATS_UPDATED_SUBSCRIPTION, {
-        ...subscriptionOptions,
-        onData: ({ data }) => console.log('[Sub] attackPathStatsUpdated', data.data),
-        onError: (error) => console.error('[Sub] attackPathStatsUpdated error', error),
-    });
-
-    const { data: vulnerabilitySeverityUpdate } = useSubscription(VULNERABILITY_SEVERITY_UPDATED_SUBSCRIPTION, {
-        ...subscriptionOptions,
-        onData: ({ data }) => console.log('[Sub] vulnerabilitySeverityUpdated', data.data),
-        onError: (error) => console.error('[Sub] vulnerabilitySeverityUpdated error', error),
-    });
-
-    // Refetch all data on demand (triggers full query reload)
-    const handleRefetch = useCallback(() => {
-        if (!skip) {
-            refetch();
+    // Subscribe to all real-time updates via WebSocket.
+    // Each subscription updates its corresponding query field in the Apollo cache.
+    useEffect(() => {
+        if (skip) {
+            return;
         }
-    }, [refetch, skip]);
+
+        const unsubscribers = SUBSCRIPTION_MAPPINGS.map(({ document, queryField, subscriptionField }) =>
+            subscribeToMoreReference.current({
+                document,
+                updateQuery: (previous, { subscriptionData }) => {
+                    const payload = subscriptionData.data as unknown as null | Record<string, unknown>;
+                    const updatedValue = payload?.[subscriptionField];
+
+                    if (updatedValue === undefined) {
+                        return previous;
+                    }
+
+                    return { ...previous, [queryField]: updatedValue } as FullDashboardData;
+                },
+                variables,
+            }),
+        );
+
+        return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+    }, [skip, variables]);
 
     // Refetch on initial mount when groupId becomes available
     useEffect(() => {
@@ -230,41 +320,34 @@ export function useFlowDashboard(groupId: null | string): FlowDashboardResult {
         }
     }, [skip, refetch]);
 
-    // Merge query data with subscription updates (subscriptions take priority)
-    const dashboard: null | PentestSummary = dashboardUpdate?.dashboardUpdated ?? data?.dashboard ?? null;
-
-    const attackSurface: AttackSurfaceEntity[] = attackSurfaceUpdate?.attackSurfaceUpdated ?? data?.attackSurface ?? [];
-
-    const mainAttackChain: GraphData | null =
-        mainAttackChainUpdate?.mainAttackChainUpdated ?? data?.mainAttackChain ?? null;
-
-    const attackPathStats: AttackPathStats | null =
-        attackPathStatsUpdate?.attackPathStatsUpdated ?? data?.attackPathStats ?? null;
-
-    const vulnerabilitySeverity: VulnerabilitySeverityRecord[] =
-        vulnerabilitySeverityUpdate?.vulnerabilitySeverityUpdated ?? data?.vulnerabilitySeverity ?? [];
+    // Refetch all data on demand
+    const handleRefetch = useCallback(() => {
+        if (!skip) {
+            refetch();
+        }
+    }, [refetch, skip]);
 
     return {
         accessChainGraph: data?.accessChainGraph ?? null,
         accessDetails: data?.accessDetails ?? [],
         allCves: data?.allCves ?? [],
         artifacts: data?.artifacts ?? [],
-        attackPathStats,
-        attackSurface,
+        attackPathStats: data?.attackPathStats ?? null,
+        attackSurface: data?.attackSurface ?? [],
         credentialsStatus: data?.credentialsStatus ?? [],
-        dashboard,
+        dashboard: data?.dashboard ?? null,
         error: error ? error.message : null,
         exploitAttempts: data?.exploitAttempts ?? [],
         fullAttackChain: data?.fullAttackChain ?? null,
         hostsWithServices: data?.hostsWithServices ?? [],
         infrastructureGraph: data?.infrastructureGraph ?? null,
         isLoading: loading,
-        mainAttackChain,
+        mainAttackChain: data?.mainAttackChain ?? null,
         openPorts: data?.openPorts ?? [],
         refetch: handleRefetch,
         shortestPathGraph: data?.shortestPathGraph ?? null,
         toolEffectiveness: data?.toolEffectiveness ?? [],
         toolUsage: data?.toolUsage ?? [],
-        vulnerabilitySeverity,
+        vulnerabilitySeverity: data?.vulnerabilitySeverity ?? [],
     };
 }

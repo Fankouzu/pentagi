@@ -1,12 +1,15 @@
-import { Maximize, Minus, Plus } from 'lucide-react';
+import { Focus, Maximize, Minimize, Minus, Plus } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Kbd } from '@/components/ui/kbd';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { isMac } from '@/lib/utils/platform';
 
 import type { GraphData, GraphEdge, GraphNode as GraphNodeData } from './use-flow-dashboard';
 
@@ -66,11 +69,11 @@ const ENTITY_COLORS: Record<string, string> = {
 
 const DEFAULT_NODE_COLOR = '#64748b';
 
-const NODE_WIDTH = 140;
-const NODE_HEIGHT = 40;
+const NODE_WIDTH = 280;
+const NODE_HEIGHT = 80;
 const NODE_HALF_WIDTH = NODE_WIDTH / 2;
 const NODE_HALF_HEIGHT = NODE_HEIGHT / 2;
-const NODE_BORDER_RADIUS = 8;
+const NODE_BORDER_RADIUS = 16;
 const MIN_ZOOM = 0.15;
 const MAX_ZOOM = 5;
 const ZOOM_STEP = 1.15;
@@ -83,7 +86,7 @@ function computeFitTransform(nodes: GraphNode[], viewportWidth: number, viewport
         return { scale: 1, x: 0, y: 0 };
     }
 
-    const padding = 60;
+    const padding = 120;
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -122,8 +125,8 @@ function computeLayout(rawNodes: GraphNode[], rawLinks: GraphLink[]): { links: G
         return { links, nodes };
     }
 
-    const HORIZONTAL_SPACING = 240;
-    const VERTICAL_SPACING = 70;
+    const HORIZONTAL_SPACING = 480;
+    const VERTICAL_SPACING = 140;
 
     // Build adjacency maps
     const nodeById = new Map<string, GraphNode>();
@@ -144,22 +147,22 @@ function computeLayout(rawNodes: GraphNode[], rawLinks: GraphLink[]): { links: G
     }
 
     const SEMANTIC_LEVEL: Record<string, number> = {
-        Host: 0,
-        Port: 1,
-        Service: 2,
-        VHost: 2,
-        WebApp: 3,
-        Endpoint: 4,
-        Vulnerability: 5,
-        Misconfiguration: 5,
-        Credential: 6,
-        Artifact: 6,
-        Attempt: 6,
-        ValidAccess: 7,
         Account: 8,
-        PrivChange: 8,
-        Capability: 9,
+        Artifact: 6,
         AttackTechnique: 9,
+        Attempt: 6,
+        Capability: 9,
+        Credential: 6,
+        Endpoint: 4,
+        Host: 0,
+        Misconfiguration: 5,
+        Port: 1,
+        PrivChange: 8,
+        Service: 2,
+        ValidAccess: 7,
+        VHost: 2,
+        Vulnerability: 5,
+        WebApp: 3,
     };
 
     const DEFAULT_LEVEL = 5;
@@ -214,8 +217,8 @@ function computeLayout(rawNodes: GraphNode[], rawLinks: GraphLink[]): { links: G
         // Sort by average y of all connected neighbors in previous levels
         groupNodes.sort((a, b) => {
             const avgY = (nodeId: string): number => {
-                const neighbors = [...(parentIds.get(nodeId) ?? []), ...(childrenIds.get(nodeId) ?? [])].filter(
-                    (id) => positionedY.has(id),
+                const neighbors = [...(parentIds.get(nodeId) ?? []), ...(childrenIds.get(nodeId) ?? [])].filter((id) =>
+                    positionedY.has(id),
                 );
 
                 if (!neighbors.length) {
@@ -338,6 +341,8 @@ const FlowGraph = ({ data }: FlowGraphProps) => {
     const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
     const [hoveredLink, setHoveredLink] = useState<GraphLink | null>(null);
 
+    const [isFullscreen, setIsFullscreen] = useState(false);
+
     // Pan & zoom state: null = auto-fit, set = user override
     const [userTransform, setUserTransform] = useState<null | ViewTransform>(null);
     const [isPanning, setIsPanning] = useState(false);
@@ -434,7 +439,7 @@ const FlowGraph = ({ data }: FlowGraphProps) => {
         [clampScale, userTransform, autoFitTransform],
     );
 
-    // Mouse wheel zoom — native listener to allow preventDefault on passive scroll
+    // Mouse wheel zoom only when Ctrl/Cmd is held — otherwise scroll is passed to parent
     useEffect(() => {
         const container = containerRef.current;
 
@@ -443,6 +448,10 @@ const FlowGraph = ({ data }: FlowGraphProps) => {
         }
 
         const handleWheel = (event: WheelEvent) => {
+            if (!(event.ctrlKey || event.metaKey)) {
+                return;
+            }
+
             event.preventDefault();
             event.stopPropagation();
 
@@ -510,6 +519,35 @@ const FlowGraph = ({ data }: FlowGraphProps) => {
     // Fit all nodes into view — reset to auto-fit
     const handleFitToView = useCallback(() => {
         setUserTransform(null);
+    }, []);
+
+    const handleToggleFullscreen = useCallback(() => {
+        const container = containerRef.current;
+
+        if (!container) {
+            return;
+        }
+
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+        } else {
+            container.requestFullscreen();
+        }
+    }, []);
+
+    const [portalContainer, setPortalContainer] = useState<HTMLElement | undefined>(undefined);
+
+    useEffect(() => {
+        const handleFullscreenChange = () => {
+            const active = !!document.fullscreenElement;
+            setIsFullscreen(active);
+            setPortalContainer(active ? (containerRef.current ?? undefined) : undefined);
+            setUserTransform(null);
+        };
+
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+
+        return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
     }, []);
 
     const handleZoomIn = useCallback(() => {
@@ -605,7 +643,7 @@ const FlowGraph = ({ data }: FlowGraphProps) => {
 
             {/* Graph SVG */}
             <div
-                className={`bg-background relative h-[500px] w-full overflow-hidden rounded-lg border ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
+                className={`bg-background relative w-full overflow-hidden rounded-lg border ${isPanning ? 'cursor-grabbing' : 'cursor-grab'} ${isFullscreen ? 'h-screen rounded-none border-none' : 'h-[500px]'}`}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
@@ -618,28 +656,28 @@ const FlowGraph = ({ data }: FlowGraphProps) => {
                     <defs>
                         <marker
                             id="arrowhead"
-                            markerHeight="6"
-                            markerWidth="8"
+                            markerHeight="12"
+                            markerWidth="16"
                             orient="auto"
-                            refX="8"
-                            refY="3"
+                            refX="16"
+                            refY="6"
                         >
                             <path
                                 className="fill-muted-foreground/40"
-                                d="M0,0 L0,6 L8,3 z"
+                                d="M0,0 L0,12 L16,6 z"
                             />
                         </marker>
                         <marker
                             id="arrowhead-active"
-                            markerHeight="6"
-                            markerWidth="8"
+                            markerHeight="12"
+                            markerWidth="16"
                             orient="auto"
-                            refX="8"
-                            refY="3"
+                            refX="16"
+                            refY="6"
                         >
                             <path
                                 className="fill-foreground"
-                                d="M0,0 L0,6 L8,3 z"
+                                d="M0,0 L0,12 L16,6 z"
                             />
                         </marker>
                     </defs>
@@ -685,22 +723,22 @@ const FlowGraph = ({ data }: FlowGraphProps) => {
                                             markerEnd={isHighlighted ? 'url(#arrowhead-active)' : 'url(#arrowhead)'}
                                             stroke={isHighlighted ? 'currentColor' : 'var(--color-muted-foreground)'}
                                             strokeOpacity={isHighlighted ? 0.8 : 0.25}
-                                            strokeWidth={isHighlighted ? 2 : 1}
+                                            strokeWidth={isHighlighted ? 4 : 2}
                                         />
                                         {/* Invisible wider path for easier hovering */}
                                         <path
                                             d={pathData}
                                             fill="none"
                                             stroke="transparent"
-                                            strokeWidth={12}
+                                            strokeWidth={24}
                                         />
                                         {/* Edge label on hover */}
                                         {isHighlighted && (
                                             <text
-                                                className="fill-foreground pointer-events-none text-[10px] select-none"
+                                                className="fill-foreground pointer-events-none text-[20px] select-none"
                                                 textAnchor="middle"
                                                 x={midX}
-                                                y={midY - 6}
+                                                y={midY - 12}
                                             >
                                                 {link.relationshipType.replaceAll('_', ' ')}
                                             </text>
@@ -737,15 +775,15 @@ const FlowGraph = ({ data }: FlowGraphProps) => {
                                         {isHighlighted && (
                                             <rect
                                                 fill="none"
-                                                height={NODE_HEIGHT + 10}
+                                                height={NODE_HEIGHT + 20}
                                                 opacity={0.3}
-                                                rx={NODE_BORDER_RADIUS + 2}
-                                                ry={NODE_BORDER_RADIUS + 2}
+                                                rx={NODE_BORDER_RADIUS + 4}
+                                                ry={NODE_BORDER_RADIUS + 4}
                                                 stroke={color}
-                                                strokeWidth={3}
-                                                width={NODE_WIDTH + 10}
-                                                x={-(NODE_WIDTH + 10) / 2}
-                                                y={-(NODE_HEIGHT + 10) / 2}
+                                                strokeWidth={6}
+                                                width={NODE_WIDTH + 20}
+                                                x={-(NODE_WIDTH + 20) / 2}
+                                                y={-(NODE_HEIGHT + 20) / 2}
                                             />
                                         )}
 
@@ -757,7 +795,7 @@ const FlowGraph = ({ data }: FlowGraphProps) => {
                                             rx={NODE_BORDER_RADIUS}
                                             ry={NODE_BORDER_RADIUS}
                                             stroke={color}
-                                            strokeWidth={isHighlighted ? 2.5 : 1.5}
+                                            strokeWidth={isHighlighted ? 5 : 3}
                                             width={NODE_WIDTH}
                                             x={-NODE_HALF_WIDTH}
                                             y={-NODE_HALF_HEIGHT}
@@ -765,22 +803,22 @@ const FlowGraph = ({ data }: FlowGraphProps) => {
 
                                         {/* Entity type */}
                                         <text
-                                            className="pointer-events-none text-[10px] font-bold uppercase select-none"
+                                            className="pointer-events-none text-[20px] font-bold uppercase select-none"
                                             dominantBaseline="central"
                                             fill={color}
                                             textAnchor="middle"
-                                            y={-6}
+                                            y={-12}
                                         >
                                             {truncateLabel(node.name, 18)}
                                         </text>
 
                                         {/* Node name */}
                                         <text
-                                            className="pointer-events-none text-[9px] select-none"
+                                            className="pointer-events-none text-[18px] select-none"
                                             dominantBaseline="central"
                                             fill={color}
                                             textAnchor="middle"
-                                            y={8}
+                                            y={16}
                                         >
                                             {node.entityType}
                                         </text>
@@ -796,33 +834,74 @@ const FlowGraph = ({ data }: FlowGraphProps) => {
                     className="absolute top-3 right-3 flex flex-col gap-1"
                     onPointerDown={(event) => event.stopPropagation()}
                 >
-                    <Button
-                        className="size-8"
-                        onClick={handleZoomIn}
-                        size="icon"
-                        title="Zoom in"
-                        variant="outline"
-                    >
-                        <Plus className="size-4" />
-                    </Button>
-                    <Button
-                        className="size-8"
-                        onClick={handleZoomOut}
-                        size="icon"
-                        title="Zoom out"
-                        variant="outline"
-                    >
-                        <Minus className="size-4" />
-                    </Button>
-                    <Button
-                        className="size-8"
-                        onClick={handleFitToView}
-                        size="icon"
-                        title="Fit to view"
-                        variant="outline"
-                    >
-                        <Maximize className="size-4" />
-                    </Button>
+                    <TooltipProvider delayDuration={200}>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    onClick={handleZoomIn}
+                                    size="icon-sm"
+                                    variant="outline"
+                                >
+                                    <Plus />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent className="flex flex-col items-center gap-2">
+                                <span>Zoom in</span>
+                                <span>
+                                    <Kbd>{isMac() ? '⌘' : 'Ctrl'}</Kbd> + <Kbd>Scroll ↑</Kbd>
+                                </span>
+                            </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    onClick={handleZoomOut}
+                                    size="icon-sm"
+                                    variant="outline"
+                                >
+                                    <Minus />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent className="flex flex-col items-center gap-2">
+                                <span>Zoom out</span>
+                                <span>
+                                    <Kbd>{isMac() ? '⌘' : 'Ctrl'}</Kbd> + <Kbd>Scroll ↓</Kbd>
+                                </span>
+                            </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    onClick={handleFitToView}
+                                    size="icon-sm"
+                                    variant="outline"
+                                >
+                                    <Focus />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Fit to view</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    className="mt-3"
+                                    onClick={handleToggleFullscreen}
+                                    size="icon-sm"
+                                    variant="outline"
+                                >
+                                    {isFullscreen ? <Minimize /> : <Maximize />}
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent className="flex flex-col items-center gap-2">
+                                <span>{isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}</span>
+                                {isFullscreen && (
+                                    <span>
+                                        <Kbd>Esc</Kbd>
+                                    </span>
+                                )}
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
                 </div>
 
                 {/* Zoom level indicator */}
@@ -865,6 +944,7 @@ const FlowGraph = ({ data }: FlowGraphProps) => {
             >
                 <SheetContent
                     className="flex w-[420px] flex-col gap-0 p-0 sm:max-w-[420px]"
+                    container={portalContainer}
                     onInteractOutside={(event) => event.preventDefault()}
                     overlay={false}
                 >

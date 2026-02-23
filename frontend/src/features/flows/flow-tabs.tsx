@@ -1,5 +1,3 @@
-import type { Dispatch, SetStateAction } from 'react';
-
 import { useEffect, useRef } from 'react';
 
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
@@ -17,7 +15,7 @@ import { useBreakpoint } from '@/hooks/use-breakpoint';
 
 interface FlowTabsProps {
     activeTab: string;
-    onTabChange: Dispatch<SetStateAction<string>>;
+    onTabChange: (tab: string) => void;
 }
 
 const FlowTabs = ({ activeTab, onTabChange }: FlowTabsProps) => {

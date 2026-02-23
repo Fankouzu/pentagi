@@ -206,15 +206,33 @@ export const typeDefs = gql`
         # Attack surface changes
         attackSurfaceUpdated(groupId: String!): [AttackSurfaceEntity!]!
 
-        # Graph data updates
-        mainAttackChainUpdated(groupId: String!): GraphData!
-        fullAttackChainUpdated(groupId: String!): GraphData!
+        # Credentials & Access updates
+        credentialsStatusUpdated(groupId: String!): [CredentialStatus!]!
+        accessDetailsUpdated(groupId: String!): [AccessRecord!]!
 
-        # Attack path stats changes
-        attackPathStatsUpdated(groupId: String!): AttackPathStats!
+        # Infrastructure updates
+        hostsWithServicesUpdated(groupId: String!): [HostWithServices!]!
+        openPortsUpdated(groupId: String!): [OpenPort!]!
 
         # Vulnerability updates
         vulnerabilitySeverityUpdated(groupId: String!): [VulnerabilitySeverity!]!
+        allCvesUpdated(groupId: String!): [CveRecord!]!
+        exploitAttemptsUpdated(groupId: String!): [ExploitAttempt!]!
+
+        # Tools updates
+        toolUsageUpdated(groupId: String!): [ToolUsage!]!
+        toolEffectivenessUpdated(groupId: String!): [ToolEffectiveness!]!
+        artifactsUpdated(groupId: String!): [Artifact!]!
+
+        # Graph data updates
+        mainAttackChainUpdated(groupId: String!): GraphData!
+        fullAttackChainUpdated(groupId: String!): GraphData!
+        infrastructureGraphUpdated(groupId: String!): GraphData!
+        accessChainGraphUpdated(groupId: String!): GraphData!
+        shortestPathGraphUpdated(groupId: String!): GraphData!
+
+        # Attack path stats changes
+        attackPathStatsUpdated(groupId: String!): AttackPathStats!
     }
 
     # ---------------------------------------------------------------------------
