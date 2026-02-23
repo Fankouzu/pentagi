@@ -17,6 +17,7 @@
 - [Overview](#-overview)
 - [Features](#-features)
 - [Quick Start](#-quick-start)
+- [API Access](#-api-access)
 - [Advanced Setup](#-advanced-setup)
 - [Development](#-development)
 - [Testing LLM Agents](#-testing-llm-agents)
@@ -47,11 +48,12 @@ You can watch the video **PentAGI overview**:
 - 📝 Detailed Reporting. Generation of thorough vulnerability reports with exploitation guides.
 - 📦 Smart Container Management. Automatic Docker image selection based on specific task requirements.
 - 📱 Modern Interface. Clean and intuitive web UI for system management and monitoring.
-- 🔌 API Integration. Support for REST and GraphQL APIs for seamless external system integration.
+- 🔌 Comprehensive APIs. Full-featured REST and GraphQL APIs with Bearer token authentication for automation and integration.
 - 💾 Persistent Storage. All commands and outputs are stored in PostgreSQL with [pgvector](https://hub.docker.com/r/vxcontrol/pgvector) extension.
 - 🎯 Scalable Architecture. Microservices-based design supporting horizontal scaling.
 - 🏠 Self-Hosted Solution. Complete control over your deployment and data.
 - 🔑 Flexible Authentication. Support for various LLM providers ([OpenAI](https://platform.openai.com/), [Anthropic](https://www.anthropic.com/), [Ollama](https://ollama.com/), [AWS Bedrock](https://aws.amazon.com/bedrock/), [Google AI/Gemini](https://ai.google.dev/), [Deep Infra](https://deepinfra.com/), [OpenRouter](https://openrouter.ai/), [DeepSeek](https://www.deepseek.com/en)), [Moonshot](https://platform.moonshot.ai/) and custom configurations.
+- 🔐 API Token Authentication. Secure Bearer token system for programmatic access to REST and GraphQL APIs.
 - ⚡ Quick Deployment. Easy setup through [Docker Compose](https://docs.docker.com/compose/) with comprehensive environment configuration.
 
 ## 🏗️ Architecture
@@ -375,29 +377,29 @@ The algorithm operates on a structured representation of conversation chains (Ch
 
 ### Global Summarizer Configuration Options
 
-| Parameter | Environment Variable | Default | Description |
-|-----------|----------------------|---------|-------------|
-| Preserve Last | `SUMMARIZER_PRESERVE_LAST` | `true` | Whether to keep all messages in the last section intact |
-| Use QA Pairs | `SUMMARIZER_USE_QA` | `true` | Whether to use QA pair summarization strategy |
-| Summarize Human in QA | `SUMMARIZER_SUM_MSG_HUMAN_IN_QA` | `false` | Whether to summarize human messages in QA pairs |
-| Last Section Size | `SUMMARIZER_LAST_SEC_BYTES` | `51200` | Maximum byte size for last section (50KB) |
-| Max Body Pair Size | `SUMMARIZER_MAX_BP_BYTES` | `16384` | Maximum byte size for a single body pair (16KB) |
-| Max QA Sections | `SUMMARIZER_MAX_QA_SECTIONS` | `10` | Maximum QA pair sections to preserve |
-| Max QA Size | `SUMMARIZER_MAX_QA_BYTES` | `65536` | Maximum byte size for QA pair sections (64KB) |
-| Keep QA Sections | `SUMMARIZER_KEEP_QA_SECTIONS` | `1` | Number of recent QA sections to keep without summarization |
+| Parameter             | Environment Variable             | Default | Description                                                |
+| --------------------- | -------------------------------- | ------- | ---------------------------------------------------------- |
+| Preserve Last         | `SUMMARIZER_PRESERVE_LAST`       | `true`  | Whether to keep all messages in the last section intact    |
+| Use QA Pairs          | `SUMMARIZER_USE_QA`              | `true`  | Whether to use QA pair summarization strategy              |
+| Summarize Human in QA | `SUMMARIZER_SUM_MSG_HUMAN_IN_QA` | `false` | Whether to summarize human messages in QA pairs            |
+| Last Section Size     | `SUMMARIZER_LAST_SEC_BYTES`      | `51200` | Maximum byte size for last section (50KB)                  |
+| Max Body Pair Size    | `SUMMARIZER_MAX_BP_BYTES`        | `16384` | Maximum byte size for a single body pair (16KB)            |
+| Max QA Sections       | `SUMMARIZER_MAX_QA_SECTIONS`     | `10`    | Maximum QA pair sections to preserve                       |
+| Max QA Size           | `SUMMARIZER_MAX_QA_BYTES`        | `65536` | Maximum byte size for QA pair sections (64KB)              |
+| Keep QA Sections      | `SUMMARIZER_KEEP_QA_SECTIONS`    | `1`     | Number of recent QA sections to keep without summarization |
 
 ### Assistant Summarizer Configuration Options
 
 Assistant instances can use customized summarization settings to fine-tune context management behavior:
 
-| Parameter | Environment Variable | Default | Description |
-|-----------|----------------------|---------|-------------|
-| Preserve Last | `ASSISTANT_SUMMARIZER_PRESERVE_LAST` | `true` | Whether to preserve all messages in the assistant's last section |
-| Last Section Size | `ASSISTANT_SUMMARIZER_LAST_SEC_BYTES` | `76800` | Maximum byte size for assistant's last section (75KB) |
-| Max Body Pair Size | `ASSISTANT_SUMMARIZER_MAX_BP_BYTES` | `16384` | Maximum byte size for a single body pair in assistant context (16KB) |
-| Max QA Sections | `ASSISTANT_SUMMARIZER_MAX_QA_SECTIONS` | `7` | Maximum QA sections to preserve in assistant context |
-| Max QA Size | `ASSISTANT_SUMMARIZER_MAX_QA_BYTES` | `76800` | Maximum byte size for assistant's QA sections (75KB) |
-| Keep QA Sections | `ASSISTANT_SUMMARIZER_KEEP_QA_SECTIONS` | `3` | Number of recent QA sections to preserve without summarization |
+| Parameter          | Environment Variable                    | Default | Description                                                          |
+| ------------------ | --------------------------------------- | ------- | -------------------------------------------------------------------- |
+| Preserve Last      | `ASSISTANT_SUMMARIZER_PRESERVE_LAST`    | `true`  | Whether to preserve all messages in the assistant's last section     |
+| Last Section Size  | `ASSISTANT_SUMMARIZER_LAST_SEC_BYTES`   | `76800` | Maximum byte size for assistant's last section (75KB)                |
+| Max Body Pair Size | `ASSISTANT_SUMMARIZER_MAX_BP_BYTES`     | `16384` | Maximum byte size for a single body pair in assistant context (16KB) |
+| Max QA Sections    | `ASSISTANT_SUMMARIZER_MAX_QA_SECTIONS`  | `7`     | Maximum QA sections to preserve in assistant context                 |
+| Max QA Size        | `ASSISTANT_SUMMARIZER_MAX_QA_BYTES`     | `76800` | Maximum byte size for assistant's QA sections (75KB)                 |
+| Keep QA Sections   | `ASSISTANT_SUMMARIZER_KEEP_QA_SECTIONS` | `3`     | Number of recent QA sections to preserve without summarization       |
 
 The assistant summarizer configuration provides more memory for context retention compared to the global settings, preserving more recent conversation history while still ensuring efficient token usage.
 
@@ -429,7 +431,7 @@ The architecture of PentAGI is designed to be modular, scalable, and secure. Her
 
 1. **Core Services**
    - Frontend UI: React-based web interface with TypeScript for type safety
-   - Backend API: Go-based REST and GraphQL APIs for flexible integration
+   - Backend API: Go-based REST and GraphQL APIs with Bearer token authentication for programmatic access
    - Vector Store: PostgreSQL with pgvector for semantic search and memory storage
    - Task Queue: Async task processing system for reliable operation
    - AI Agent: Multi-agent system with specialized roles for efficient testing
@@ -665,8 +667,8 @@ Visit [localhost:8443](https://localhost:8443) to access PentAGI Web UI (default
 
 PentAGI allows you to configure default behavior for assistants:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
+| Variable               | Default | Description                                                             |
+| ---------------------- | ------- | ----------------------------------------------------------------------- |
 | `ASSISTANT_USE_AGENTS` | `false` | Controls the default value for agent usage when creating new assistants |
 
 The `ASSISTANT_USE_AGENTS` setting affects the initial state of the "Use Agents" toggle when creating a new assistant in the UI:
@@ -675,17 +677,322 @@ The `ASSISTANT_USE_AGENTS` setting affects the initial state of the "Use Agents"
 
 Note that users can always override this setting by toggling the "Use Agents" button in the UI when creating or editing an assistant. This environment variable only controls the initial default state.
 
+## 🔌 API Access
+
+PentAGI provides comprehensive programmatic access through both REST and GraphQL APIs, allowing you to integrate penetration testing workflows into your automation pipelines, CI/CD processes, and custom applications.
+
+### Generating API Tokens
+
+API tokens are managed through the PentAGI web interface:
+
+1. Navigate to **Settings** → **API Tokens** in the web UI
+2. Click **Create Token** to generate a new API token
+3. Configure token properties:
+   - **Name** (optional): A descriptive name for the token
+   - **Expiration Date**: When the token will expire (minimum 1 minute, maximum 3 years)
+4. Click **Create** and **copy the token immediately** - it will only be shown once for security reasons
+5. Use the token as a Bearer token in your API requests
+
+Each token is associated with your user account and inherits your role's permissions.
+
+### Using API Tokens
+
+Include the API token in the `Authorization` header of your HTTP requests:
+
+```bash
+# GraphQL API example
+curl -X POST https://your-pentagi-instance:8443/api/v1/graphql \
+  -H "Authorization: Bearer YOUR_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ flows { id title status } }"}'
+
+# REST API example
+curl https://your-pentagi-instance:8443/api/v1/flows \
+  -H "Authorization: Bearer YOUR_API_TOKEN"
+```
+
+### API Exploration and Testing
+
+PentAGI provides interactive documentation for exploring and testing API endpoints:
+
+#### GraphQL Playground
+
+Access the GraphQL Playground at `https://your-pentagi-instance:8443/api/v1/graphql/playground`
+
+1. Click the **HTTP Headers** tab at the bottom
+2. Add your authorization header:
+   ```json
+   {
+     "Authorization": "Bearer YOUR_API_TOKEN"
+   }
+   ```
+3. Explore the schema, run queries, and test mutations interactively
+
+#### Swagger UI
+
+Access the REST API documentation at `https://your-pentagi-instance:8443/api/v1/swagger/index.html`
+
+1. Click the **Authorize** button
+2. Enter your token in the format: `Bearer YOUR_API_TOKEN`
+3. Click **Authorize** to apply
+4. Test endpoints directly from the Swagger UI
+
+### Generating API Clients
+
+You can generate type-safe API clients for your preferred programming language using the schema files included with PentAGI:
+
+#### GraphQL Clients
+
+The GraphQL schema is available at:
+- **Web UI**: Navigate to Settings to download `schema.graphqls`
+- **Direct file**: `backend/pkg/graph/schema.graphqls` in the repository
+
+Generate clients using tools like:
+- **GraphQL Code Generator** (JavaScript/TypeScript): [https://the-guild.dev/graphql/codegen](https://the-guild.dev/graphql/codegen)
+- **genqlient** (Go): [https://github.com/Khan/genqlient](https://github.com/Khan/genqlient)
+- **Apollo iOS** (Swift): [https://www.apollographql.com/docs/ios](https://www.apollographql.com/docs/ios)
+
+#### REST API Clients
+
+The OpenAPI specification is available at:
+- **Swagger JSON**: `https://your-pentagi-instance:8443/api/v1/swagger/doc.json`
+- **Swagger YAML**: Available in `backend/pkg/server/docs/swagger.yaml`
+
+Generate clients using:
+- **OpenAPI Generator**: [https://openapi-generator.tech](https://openapi-generator.tech)
+  ```bash
+  openapi-generator-cli generate \
+    -i https://your-pentagi-instance:8443/api/v1/swagger/doc.json \
+    -g python \
+    -o ./pentagi-client
+  ```
+
+- **Swagger Codegen**: [https://github.com/swagger-api/swagger-codegen](https://github.com/swagger-api/swagger-codegen)
+  ```bash
+  swagger-codegen generate \
+    -i https://your-pentagi-instance:8443/api/v1/swagger/doc.json \
+    -l typescript-axios \
+    -o ./pentagi-client
+  ```
+
+- **swagger-typescript-api** (TypeScript): [https://github.com/acacode/swagger-typescript-api](https://github.com/acacode/swagger-typescript-api)
+  ```bash
+  npx swagger-typescript-api \
+    -p https://your-pentagi-instance:8443/api/v1/swagger/doc.json \
+    -o ./src/api \
+    -n pentagi-api.ts
+  ```
+
+### API Usage Examples
+
+<details>
+<summary><b>Creating a New Flow (GraphQL)</b></summary>
+
+```graphql
+mutation CreateFlow {
+  createFlow(
+    modelProvider: "openai"
+    input: "Test the security of https://example.com"
+  ) {
+    id
+    title
+    status
+    createdAt
+  }
+}
+```
+
+</details>
+
+<details>
+<summary><b>Listing Flows (REST API)</b></summary>
+
+```bash
+curl https://your-pentagi-instance:8443/api/v1/flows \
+  -H "Authorization: Bearer YOUR_API_TOKEN" \
+  | jq '.flows[] | {id, title, status}'
+```
+
+</details>
+
+<details>
+<summary><b>Python Client Example</b></summary>
+
+```python
+import requests
+
+class PentAGIClient:
+    def __init__(self, base_url, api_token):
+        self.base_url = base_url
+        self.headers = {
+            "Authorization": f"Bearer {api_token}",
+            "Content-Type": "application/json"
+        }
+    
+    def create_flow(self, provider, target):
+        query = """
+        mutation CreateFlow($provider: String!, $input: String!) {
+          createFlow(modelProvider: $provider, input: $input) {
+            id
+            title
+            status
+          }
+        }
+        """
+        response = requests.post(
+            f"{self.base_url}/api/v1/graphql",
+            json={
+                "query": query,
+                "variables": {
+                    "provider": provider,
+                    "input": target
+                }
+            },
+            headers=self.headers
+        )
+        return response.json()
+    
+    def get_flows(self):
+        response = requests.get(
+            f"{self.base_url}/api/v1/flows",
+            headers=self.headers
+        )
+        return response.json()
+
+# Usage
+client = PentAGIClient(
+    "https://your-pentagi-instance:8443",
+    "your_api_token_here"
+)
+
+# Create a new flow
+flow = client.create_flow("openai", "Scan https://example.com for vulnerabilities")
+print(f"Created flow: {flow}")
+
+# List all flows
+flows = client.get_flows()
+print(f"Total flows: {len(flows['flows'])}")
+```
+
+</details>
+
+<details>
+<summary><b>TypeScript Client Example</b></summary>
+
+```typescript
+import axios, { AxiosInstance } from 'axios';
+
+interface Flow {
+  id: string;
+  title: string;
+  status: string;
+  createdAt: string;
+}
+
+class PentAGIClient {
+  private client: AxiosInstance;
+
+  constructor(baseURL: string, apiToken: string) {
+    this.client = axios.create({
+      baseURL: `${baseURL}/api/v1`,
+      headers: {
+        'Authorization': `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+  }
+
+  async createFlow(provider: string, input: string): Promise<Flow> {
+    const query = `
+      mutation CreateFlow($provider: String!, $input: String!) {
+        createFlow(modelProvider: $provider, input: $input) {
+          id
+          title
+          status
+          createdAt
+        }
+      }
+    `;
+
+    const response = await this.client.post('/graphql', {
+      query,
+      variables: { provider, input },
+    });
+
+    return response.data.data.createFlow;
+  }
+
+  async getFlows(): Promise<Flow[]> {
+    const response = await this.client.get('/flows');
+    return response.data.flows;
+  }
+
+  async getFlow(flowId: string): Promise<Flow> {
+    const response = await this.client.get(`/flows/${flowId}`);
+    return response.data;
+  }
+}
+
+// Usage
+const client = new PentAGIClient(
+  'https://your-pentagi-instance:8443',
+  'your_api_token_here'
+);
+
+// Create a new flow
+const flow = await client.createFlow(
+  'openai',
+  'Perform penetration test on https://example.com'
+);
+console.log('Created flow:', flow);
+
+// List all flows
+const flows = await client.getFlows();
+console.log(`Total flows: ${flows.length}`);
+```
+
+</details>
+
+### Security Best Practices
+
+When working with API tokens:
+
+- **Never commit tokens to version control** - use environment variables or secrets management
+- **Rotate tokens regularly** - set appropriate expiration dates and create new tokens periodically
+- **Use separate tokens for different applications** - makes it easier to revoke access if needed
+- **Monitor token usage** - review API token activity in the Settings page
+- **Revoke unused tokens** - disable or delete tokens that are no longer needed
+- **Use HTTPS only** - never send API tokens over unencrypted connections
+
+### Token Management
+
+- **View tokens**: See all your active tokens in Settings → API Tokens
+- **Edit tokens**: Update token names or revoke tokens
+- **Delete tokens**: Permanently remove tokens (this action cannot be undone)
+- **Token ID**: Each token has a unique ID that can be copied for reference
+
+The token list shows:
+- Token name (if provided)
+- Token ID (unique identifier)
+- Status (active/revoked/expired)
+- Creation date
+- Expiration date
+
 ### Custom LLM Provider Configuration
 
 When using custom LLM providers with the `LLM_SERVER_*` variables, you can fine-tune the reasoning format used in requests:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LLM_SERVER_URL` | | Base URL for the custom LLM API endpoint |
-| `LLM_SERVER_KEY` | | API key for the custom LLM provider |
-| `LLM_SERVER_MODEL` | | Default model to use (can be overridden in provider config) |
-| `LLM_SERVER_CONFIG_PATH` | | Path to the YAML configuration file for agent-specific models |
-| `LLM_SERVER_LEGACY_REASONING` | `false` | Controls reasoning format in API requests |
+| Variable                        | Default | Description                                                                             |
+| ------------------------------- | ------- | --------------------------------------------------------------------------------------- |
+| `LLM_SERVER_URL`                |         | Base URL for the custom LLM API endpoint                                                |
+| `LLM_SERVER_KEY`                |         | API key for the custom LLM provider                                                     |
+| `LLM_SERVER_MODEL`              |         | Default model to use (can be overridden in provider config)                             |
+| `LLM_SERVER_CONFIG_PATH`        |         | Path to the YAML configuration file for agent-specific models                           |
+| `LLM_SERVER_PROVIDER`           |         | Provider name prefix for model names (e.g., `openrouter`, `deepseek` for LiteLLM proxy) |
+| `LLM_SERVER_LEGACY_REASONING`   | `false` | Controls reasoning format in API requests                                               |
+| `LLM_SERVER_PRESERVE_REASONING` | `false` | Preserve reasoning content in multi-turn conversations (required by some providers)     |
+
+The `LLM_SERVER_PROVIDER` setting is particularly useful when using **LiteLLM proxy**, which adds a provider prefix to model names. For example, when connecting to Moonshot API through LiteLLM, models like `kimi-2.5` become `moonshot/kimi-2.5`. By setting `LLM_SERVER_PROVIDER=moonshot`, you can use the same provider configuration file for both direct API access and LiteLLM proxy access without modifications.
 
 The `LLM_SERVER_LEGACY_REASONING` setting affects how reasoning parameters are sent to the LLM:
 - `false` (default): Uses modern format where reasoning is sent as a structured object with `max_tokens` parameter
@@ -693,18 +1000,24 @@ The `LLM_SERVER_LEGACY_REASONING` setting affects how reasoning parameters are s
 
 This setting is important when working with different LLM providers as they may expect different reasoning formats in their API requests. If you encounter reasoning-related errors with custom providers, try changing this setting.
 
+The `LLM_SERVER_PRESERVE_REASONING` setting controls whether reasoning content is preserved in multi-turn conversations:
+- `false` (default): Reasoning content is not preserved in conversation history
+- `true`: Reasoning content is preserved and sent in subsequent API calls
+
+This setting is required by some LLM providers (e.g., Moonshot) that return errors like "thinking is enabled but reasoning_content is missing in assistant tool call message" when reasoning content is not included in multi-turn conversations. Enable this setting if your provider requires reasoning content to be preserved.
+
 ### Local LLM Provider Configuration
 
 PentAGI supports Ollama for local LLM inference, providing zero-cost operation and enhanced privacy:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OLLAMA_SERVER_URL` | | URL of your Ollama server |
-| `OLLAMA_SERVER_MODEL` | `llama3.1:8b-instruct-q8_0` | Default model for inference |
-| `OLLAMA_SERVER_CONFIG_PATH` | | Path to custom agent configuration file |
-| `OLLAMA_SERVER_PULL_MODELS_TIMEOUT` | `600` | Timeout for model downloads (seconds) |
-| `OLLAMA_SERVER_PULL_MODELS_ENABLED` | `false` | Auto-download models on startup |
-| `OLLAMA_SERVER_LOAD_MODELS_ENABLED` | `false` | Query server for available models |
+| Variable                            | Default                     | Description                             |
+| ----------------------------------- | --------------------------- | --------------------------------------- |
+| `OLLAMA_SERVER_URL`                 |                             | URL of your Ollama server               |
+| `OLLAMA_SERVER_MODEL`               | `llama3.1:8b-instruct-q8_0` | Default model for inference             |
+| `OLLAMA_SERVER_CONFIG_PATH`         |                             | Path to custom agent configuration file |
+| `OLLAMA_SERVER_PULL_MODELS_TIMEOUT` | `600`                       | Timeout for model downloads (seconds)   |
+| `OLLAMA_SERVER_PULL_MODELS_ENABLED` | `false`                     | Auto-download models on startup         |
+| `OLLAMA_SERVER_LOAD_MODELS_ENABLED` | `false`                     | Query server for available models       |
 
 Configuration examples:
 
@@ -787,10 +1100,10 @@ These custom models are referenced in the pre-built provider configuration files
 
 PentAGI supports OpenAI's advanced language models, including the latest reasoning-capable o-series models designed for complex analytical tasks:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OPEN_AI_KEY` | | API key for OpenAI services |
-| `OPEN_AI_SERVER_URL` | `https://api.openai.com/v1` | OpenAI API endpoint |
+| Variable             | Default                     | Description                 |
+| -------------------- | --------------------------- | --------------------------- |
+| `OPEN_AI_KEY`        |                             | API key for OpenAI services |
+| `OPEN_AI_SERVER_URL` | `https://api.openai.com/v1` | OpenAI API endpoint         |
 
 Configuration examples:
 
@@ -818,10 +1131,10 @@ The system automatically selects appropriate OpenAI models based on task complex
 
 PentAGI integrates with Anthropic's Claude models, known for their exceptional safety, reasoning capabilities, and sophisticated understanding of complex security contexts:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | | API key for Anthropic services |
-| `ANTHROPIC_SERVER_URL` | `https://api.anthropic.com/v1` | Anthropic API endpoint |
+| Variable               | Default                        | Description                    |
+| ---------------------- | ------------------------------ | ------------------------------ |
+| `ANTHROPIC_API_KEY`    |                                | API key for Anthropic services |
+| `ANTHROPIC_SERVER_URL` | `https://api.anthropic.com/v1` | Anthropic API endpoint         |
 
 Configuration examples:
 
@@ -849,10 +1162,10 @@ The system leverages Claude's advanced understanding of security contexts to pro
 
 PentAGI supports Google's Gemini models through the Google AI API, offering state-of-the-art reasoning capabilities and multimodal features:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GEMINI_API_KEY` | | API key for Google AI services |
-| `GEMINI_SERVER_URL` | `https://generativelanguage.googleapis.com` | Google AI API endpoint |
+| Variable            | Default                                     | Description                    |
+| ------------------- | ------------------------------------------- | ------------------------------ |
+| `GEMINI_API_KEY`    |                                             | API key for Google AI services |
+| `GEMINI_SERVER_URL` | `https://generativelanguage.googleapis.com` | Google AI API endpoint         |
 
 Configuration examples:
 
@@ -880,13 +1193,13 @@ The system automatically selects appropriate Gemini models based on agent requir
 
 PentAGI integrates with Amazon Bedrock, offering access to a wide range of foundation models from leading AI companies including Anthropic, AI21, Cohere, Meta, and Amazon's own models:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BEDROCK_REGION` | `us-east-1` | AWS region for Bedrock service |
-| `BEDROCK_ACCESS_KEY_ID` | | AWS access key ID for authentication |
-| `BEDROCK_SECRET_ACCESS_KEY` | | AWS secret access key for authentication |
-| `BEDROCK_SESSION_TOKEN` | | AWS session token as alternative way for authentication |
-| `BEDROCK_SERVER_URL` | | Optional custom Bedrock endpoint URL |
+| Variable                    | Default     | Description                                             |
+| --------------------------- | ----------- | ------------------------------------------------------- |
+| `BEDROCK_REGION`            | `us-east-1` | AWS region for Bedrock service                          |
+| `BEDROCK_ACCESS_KEY_ID`     |             | AWS access key ID for authentication                    |
+| `BEDROCK_SECRET_ACCESS_KEY` |             | AWS secret access key for authentication                |
+| `BEDROCK_SESSION_TOKEN`     |             | AWS session token as alternative way for authentication |
+| `BEDROCK_SERVER_URL`        |             | Optional custom Bedrock endpoint URL                    |
 
 Configuration examples:
 
@@ -1137,9 +1450,9 @@ For using Google OAuth you need to create a new OAuth application in your Google
 
 PentAGI allows you to configure Docker image selection for executing various tasks. The system automatically chooses the most appropriate image based on the task type, but you can constrain this selection by specifying your preferred images:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DOCKER_DEFAULT_IMAGE` | `debian:latest` | Default Docker image for general tasks and ambiguous cases |
+| Variable                           | Default                | Description                                                 |
+| ---------------------------------- | ---------------------- | ----------------------------------------------------------- |
+| `DOCKER_DEFAULT_IMAGE`             | `debian:latest`        | Default Docker image for general tasks and ambiguous cases  |
 | `DOCKER_DEFAULT_IMAGE_FOR_PENTEST` | `vxcontrol/kali-linux` | Default Docker image for security/penetration testing tasks |
 
 When these environment variables are set, AI agents will be limited to the image choices you specify. This is particularly useful for:
@@ -1409,7 +1722,9 @@ LLM_SERVER_URL=https://openrouter.ai/api/v1      # or https://api.deepinfra.com/
 LLM_SERVER_KEY=your_api_key
 LLM_SERVER_MODEL=                                # Leave empty, as models are specified in the config
 LLM_SERVER_CONFIG_PATH=/opt/pentagi/conf/openrouter.provider.yml  # or deepinfra.provider.yml or deepseek.provider.yml or custom-openai.provider.yml or moonshot.provider.yml
+LLM_SERVER_PROVIDER=                             # Provider name for LiteLLM proxy (e.g., openrouter, deepseek, moonshot)
 LLM_SERVER_LEGACY_REASONING=false                # Controls reasoning format, for OpenAI must be true (default: false)
+LLM_SERVER_PRESERVE_REASONING=false              # Preserve reasoning content in multi-turn conversations (required by Moonshot, default: false)
 
 # For OpenAI (official API)
 OPEN_AI_KEY=your_openai_api_key                  # Your OpenAI API key
@@ -1465,6 +1780,41 @@ docker run --rm \
 
 > [!NOTE]
 > The `LLM_SERVER_LEGACY_REASONING=true` setting is crucial for OpenAI compatibility as it ensures reasoning parameters are sent in the format expected by OpenAI's API.
+
+#### Using LiteLLM Proxy
+
+When using LiteLLM proxy to access various LLM providers, model names are prefixed with the provider name (e.g., `moonshot/kimi-2.5` instead of `kimi-2.5`). To use the same provider configuration files with both direct API access and LiteLLM proxy, set the `LLM_SERVER_PROVIDER` variable:
+
+```bash
+# Direct access to Moonshot API
+LLM_SERVER_URL=https://api.moonshot.ai/v1
+LLM_SERVER_KEY=your_moonshot_api_key
+LLM_SERVER_CONFIG_PATH=/opt/pentagi/conf/moonshot.provider.yml
+LLM_SERVER_PROVIDER=                             # Empty for direct access
+
+# Access via LiteLLM proxy
+LLM_SERVER_URL=http://litellm-proxy:4000
+LLM_SERVER_KEY=your_litellm_api_key
+LLM_SERVER_CONFIG_PATH=/opt/pentagi/conf/moonshot.provider.yml
+LLM_SERVER_PROVIDER=moonshot                     # Provider prefix for LiteLLM
+```
+
+With `LLM_SERVER_PROVIDER=moonshot`, the system automatically prefixes all model names from the configuration file with `moonshot/`, making them compatible with LiteLLM's model naming convention.
+
+**Supported provider names for LiteLLM:**
+- `openai` - for OpenAI models via LiteLLM
+- `anthropic` - for Anthropic/Claude models via LiteLLM
+- `gemini` - for Google Gemini models via LiteLLM
+- `openrouter` - for OpenRouter aggregator
+- `deepseek` - for DeepSeek models
+- `deepinfra` - for DeepInfra hosting
+- `moonshot` - for Moonshot AI (Kimi)
+- Any other provider name configured in your LiteLLM instance
+
+This approach allows you to:
+- Use the same configuration files for both direct and proxied access
+- Switch between providers without modifying configuration files
+- Easily test different routing strategies with LiteLLM
 
 #### Running Tests in a Production Environment
 

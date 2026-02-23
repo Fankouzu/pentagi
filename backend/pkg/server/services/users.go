@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 
+	"pentagi/pkg/server/auth"
 	"pentagi/pkg/server/logger"
 	"pentagi/pkg/server/models"
 	"pentagi/pkg/server/rdb"
@@ -25,24 +26,27 @@ type usersGrouped struct {
 	Total   uint64   `json:"total"`
 }
 
-var usersSQLMappers = map[string]interface{}{
-	"id":      "{{table}}.id",
-	"hash":    "{{table}}.hash",
-	"type":    "{{table}}.type",
-	"mail":    "{{table}}.mail",
-	"name":    "{{table}}.name",
-	"role_id": "{{table}}.role_id",
-	"status":  "{{table}}.status",
-	"data":    "({{table}}.hash || ' ' || {{table}}.mail || ' ' || {{table}}.name || ' ' || {{table}}.status)",
+var usersSQLMappers = map[string]any{
+	"id":         "{{table}}.id",
+	"hash":       "{{table}}.hash",
+	"type":       "{{table}}.type",
+	"mail":       "{{table}}.mail",
+	"name":       "{{table}}.name",
+	"role_id":    "{{table}}.role_id",
+	"status":     "{{table}}.status",
+	"created_at": "{{table}}.created_at",
+	"data":       "({{table}}.hash || ' ' || {{table}}.mail || ' ' || {{table}}.name || ' ' || {{table}}.status)",
 }
 
 type UserService struct {
-	db *gorm.DB
+	db        *gorm.DB
+	userCache *auth.UserCache
 }
 
-func NewUserService(db *gorm.DB) *UserService {
+func NewUserService(db *gorm.DB, userCache *auth.UserCache) *UserService {
 	return &UserService{
-		db: db,
+		db:        db,
+		userCache: userCache,
 	}
 }
 
@@ -63,9 +67,7 @@ func (s *UserService) GetCurrentUser(c *gin.Context) {
 
 	uid := c.GetUint64("uid")
 
-	err = s.db.Take(&resp.User, "id = ?", uid).
-		Related(&resp.Role).Association("privileges").Find(&resp.Role.Privileges).Error
-	if err != nil {
+	if err = s.db.Take(&resp.User, "id = ?", uid).Error; err != nil {
 		logger.FromContext(c).WithError(err).Errorf("error finding current user")
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			response.Error(c, response.ErrUsersNotFound, err)
@@ -73,7 +75,29 @@ func (s *UserService) GetCurrentUser(c *gin.Context) {
 			response.Error(c, response.ErrInternal, err)
 		}
 		return
-	} else if err = resp.Valid(); err != nil {
+	}
+
+	if err = s.db.Take(&resp.Role, "id = ?", resp.User.RoleID).Error; err != nil {
+		logger.FromContext(c).WithError(err).Errorf("error finding role by role id")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.Error(c, response.ErrGetUserModelsNotFound, err)
+		} else {
+			response.Error(c, response.ErrInternal, err)
+		}
+		return
+	}
+
+	if err = s.db.Model(&resp.Role).Association("privileges").Find(&resp.Role.Privileges).Error; err != nil {
+		logger.FromContext(c).WithError(err).Errorf("error finding privileges by role id")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.Error(c, response.ErrGetUserModelsNotFound, err)
+		} else {
+			response.Error(c, response.ErrInternal, err)
+		}
+		return
+	}
+
+	if err = resp.Valid(); err != nil {
 		logger.FromContext(c).WithError(err).Errorf("error validating user data '%s'", resp.Hash)
 		response.Error(c, response.ErrUsersInvalidData, err)
 		return
@@ -141,10 +165,14 @@ func (s *UserService) ChangePasswordCurrentUser(c *gin.Context) {
 		response.Error(c, response.ErrChangePasswordCurrentUserInvalidNewPassword, err)
 		return
 	}
-	user.Password = string(encPass)
-	user.PasswordChangeRequired = false
 
-	if err = s.db.Scopes(scope).Select("password", "password_change_required").Save(&user).Error; err != nil {
+	// Use map to update fields to avoid GORM ignoring zero values (false for bool)
+	updates := map[string]any{
+		"password":                 string(encPass),
+		"password_change_required": false,
+	}
+
+	if err = s.db.Model(&user).Scopes(scope).Updates(updates).Error; err != nil {
 		logger.FromContext(c).WithError(err).Errorf("error updating password for current user")
 		response.Error(c, response.ErrInternal, err)
 		return
@@ -181,7 +209,7 @@ func (s *UserService) GetUsers(c *gin.Context) {
 	uid := c.GetUint64("uid")
 	privs := c.GetStringSlice("prm")
 	scope := func(db *gorm.DB) *gorm.DB {
-		if !slices.Contains(privs, "users.view'") {
+		if !slices.Contains(privs, "users.view") {
 			return db.Where("id = ?", uid)
 		}
 		return db
@@ -190,6 +218,12 @@ func (s *UserService) GetUsers(c *gin.Context) {
 	query.Init("users", usersSQLMappers)
 
 	if query.Group != "" {
+		if _, ok := usersSQLMappers[query.Group]; !ok {
+			logger.FromContext(c).Errorf("error finding users grouped: group field not found")
+			response.Error(c, response.ErrUsersInvalidRequest, errors.New("group field not found"))
+			return
+		}
+
 		var respGrouped usersGrouped
 		if respGrouped.Total, err = query.QueryGrouped(s.db, &respGrouped.Grouped, scope); err != nil {
 			logger.FromContext(c).WithError(err).Errorf("error finding users grouped")
@@ -257,7 +291,7 @@ func (s *UserService) GetUser(c *gin.Context) {
 
 	uhash := c.GetString("uhash")
 	privs := c.GetStringSlice("prm")
-	if !slices.Contains(privs, "users.view'") && uhash != hash {
+	if !slices.Contains(privs, "users.view") && uhash != hash {
 		logger.FromContext(c).Errorf("error filtering user role permissions: permission not found")
 		response.Error(c, response.ErrNotPermitted, nil)
 		return
@@ -272,9 +306,19 @@ func (s *UserService) GetUser(c *gin.Context) {
 		}
 		return
 	}
-	err = s.db.Model(&resp.User).Related(&resp.Role).Association("privileges").Find(&resp.Role.Privileges).Error
-	if err != nil {
-		logger.FromContext(c).WithError(err).Errorf("error finding related models by user hash")
+
+	if err = s.db.Take(&resp.Role, "id = ?", resp.User.RoleID).Error; err != nil {
+		logger.FromContext(c).WithError(err).Errorf("error finding role by role id")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.Error(c, response.ErrGetUserModelsNotFound, err)
+		} else {
+			response.Error(c, response.ErrInternal, err)
+		}
+		return
+	}
+
+	if err = s.db.Model(&resp.Role).Association("privileges").Find(&resp.Role.Privileges).Error; err != nil {
+		logger.FromContext(c).WithError(err).Errorf("error finding privileges by role id")
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			response.Error(c, response.ErrGetUserModelsNotFound, err)
 		} else {
@@ -318,7 +362,7 @@ func (s *UserService) CreateUser(c *gin.Context) {
 
 	rid := c.GetUint64("rid")
 	privs := c.GetStringSlice("prm")
-	if !slices.Contains(privs, "users.create'") {
+	if !slices.Contains(privs, "users.create") {
 		logger.FromContext(c).Errorf("error filtering user role permissions: permission not found")
 		response.Error(c, response.ErrNotPermitted, nil)
 		return
@@ -366,16 +410,25 @@ func (s *UserService) CreateUser(c *gin.Context) {
 		return
 	}
 
-	err = s.db.Take(&resp.User, "hash = ?", user.Hash).Related(&resp.Role).Error
-	if err != nil {
+	if err = s.db.Take(&resp.User, "hash = ?", user.Hash).Error; err != nil {
 		logger.FromContext(c).WithError(err).Errorf("error finding user by hash")
 		response.Error(c, response.ErrInternal, err)
 		return
-	} else if err = resp.Valid(); err != nil {
+	}
+
+	if err = s.db.Take(&resp.Role, "id = ?", resp.User.RoleID).Error; err != nil {
+		logger.FromContext(c).WithError(err).Errorf("error finding role by role id")
+		response.Error(c, response.ErrInternal, err)
+		return
+	}
+
+	if err = resp.Valid(); err != nil {
 		logger.FromContext(c).WithError(err).Errorf("error validating user data '%s'", resp.Hash)
 		response.Error(c, response.ErrUsersInvalidData, err)
 		return
 	}
+
+	s.userCache.Invalidate(resp.User.ID)
 
 	response.Success(c, http.StatusCreated, resp)
 }
@@ -423,19 +476,30 @@ func (s *UserService) PatchUser(c *gin.Context) {
 	uhash := c.GetString("uhash")
 	privs := c.GetStringSlice("prm")
 	scope := func(db *gorm.DB) *gorm.DB {
-		if slices.Contains(privs, "users.edit'") {
+		if slices.Contains(privs, "users.edit") {
 			return db.Where("hash = ?", hash)
 		} else {
 			return db.Where("hash = ? AND id = ?", hash, uid)
 		}
 	}
-	if !slices.Contains(privs, "users.edit'") && uhash != hash {
+	if !slices.Contains(privs, "users.edit") && uhash != hash {
 		logger.FromContext(c).Errorf("error filtering user role permissions: permission not found")
 		response.Error(c, response.ErrNotPermitted, nil)
 		return
 	}
 
-	public_info := []interface{}{"name", "status"}
+	// Check if user exists before updating
+	var existingUser models.User
+	if err = s.db.Scopes(scope).Take(&existingUser).Error; err != nil {
+		logger.FromContext(c).WithError(err).Errorf("error finding user by hash")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.Error(c, response.ErrUsersNotFound, err)
+		} else {
+			response.Error(c, response.ErrInternal, err)
+		}
+		return
+	}
+
 	if user.Password != "" {
 		var encPassword []byte
 		encPassword, err = rdb.EncryptPassword(user.Password)
@@ -444,19 +508,23 @@ func (s *UserService) PatchUser(c *gin.Context) {
 			response.Error(c, response.ErrInternal, err)
 			return
 		}
-		user.Password = string(encPassword)
-		user.PasswordChangeRequired = false
-		public_info = append(public_info, "password", "password_change_required")
-		err = s.db.Scopes(scope).Select("", public_info...).Save(&user).Error
+		// Use map to update fields to avoid GORM ignoring zero values (false for bool)
+		updates := map[string]any{
+			"name":                     user.Name,
+			"status":                   user.Status,
+			"password":                 string(encPassword),
+			"password_change_required": false,
+		}
+		err = s.db.Model(&existingUser).Updates(updates).Error
 	} else {
-		err = s.db.Scopes(scope).Select("", public_info...).Save(&user.User).Error
+		updates := map[string]any{
+			"name":   user.Name,
+			"status": user.Status,
+		}
+		err = s.db.Model(&existingUser).Updates(updates).Error
 	}
 
-	if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
-		logger.FromContext(c).Errorf("error updating user by hash '%s', user not found", hash)
-		response.Error(c, response.ErrUsersNotFound, err)
-		return
-	} else if err != nil {
+	if err != nil {
 		logger.FromContext(c).WithError(err).Errorf("error updating user by hash '%s'", hash)
 		response.Error(c, response.ErrInternal, err)
 		return
@@ -471,8 +539,9 @@ func (s *UserService) PatchUser(c *gin.Context) {
 		}
 		return
 	}
-	if err = s.db.Model(&resp.User).Related(&resp.Role).Error; err != nil {
-		logger.FromContext(c).WithError(err).Errorf("error finding related models by user hash")
+
+	if err = s.db.Take(&resp.Role, "id = ?", resp.User.RoleID).Error; err != nil {
+		logger.FromContext(c).WithError(err).Errorf("error finding role by role id")
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			response.Error(c, response.ErrPatchUserModelsNotFound, err)
 		} else {
@@ -485,6 +554,8 @@ func (s *UserService) PatchUser(c *gin.Context) {
 		response.Error(c, response.ErrInternal, err)
 		return
 	}
+
+	s.userCache.Invalidate(resp.User.ID)
 
 	response.Success(c, http.StatusOK, resp)
 }
@@ -510,13 +581,13 @@ func (s *UserService) DeleteUser(c *gin.Context) {
 	uhash := c.GetString("uhash")
 	privs := c.GetStringSlice("prm")
 	scope := func(db *gorm.DB) *gorm.DB {
-		if slices.Contains(privs, "users.delete'") {
+		if slices.Contains(privs, "users.delete") {
 			return db.Where("hash = ?", hash)
 		} else {
 			return db.Where("hash = ? AND id = ?", hash, uid)
 		}
 	}
-	if !slices.Contains(privs, "users.delete'") && uhash != hash {
+	if !slices.Contains(privs, "users.delete") && uhash != hash {
 		logger.FromContext(c).Errorf("error filtering user role permissions: permission not found")
 		response.Error(c, response.ErrNotPermitted, nil)
 		return
@@ -531,8 +602,9 @@ func (s *UserService) DeleteUser(c *gin.Context) {
 		}
 		return
 	}
-	if err = s.db.Model(&user.User).Related(&user.Role).Error; err != nil {
-		logger.FromContext(c).WithError(err).Errorf("error finding related models by user hash")
+
+	if err = s.db.Take(&user.Role, "id = ?", user.User.RoleID).Error; err != nil {
+		logger.FromContext(c).WithError(err).Errorf("error finding role by role id")
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			response.Error(c, response.ErrDeleteUserModelsNotFound, err)
 		} else {
@@ -551,6 +623,8 @@ func (s *UserService) DeleteUser(c *gin.Context) {
 		response.Error(c, response.ErrInternal, err)
 		return
 	}
+
+	s.userCache.Invalidate(user.ID)
 
 	response.Success(c, http.StatusOK, struct{}{})
 }

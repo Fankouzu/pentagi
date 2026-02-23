@@ -9,6 +9,31 @@ import (
 	"time"
 )
 
+type APIToken struct {
+	ID        int64       `json:"id"`
+	TokenID   string      `json:"tokenId"`
+	UserID    int64       `json:"userId"`
+	RoleID    int64       `json:"roleId"`
+	Name      *string     `json:"name,omitempty"`
+	TTL       int         `json:"ttl"`
+	Status    TokenStatus `json:"status"`
+	CreatedAt time.Time   `json:"createdAt"`
+	UpdatedAt time.Time   `json:"updatedAt"`
+}
+
+type APITokenWithSecret struct {
+	ID        int64       `json:"id"`
+	TokenID   string      `json:"tokenId"`
+	UserID    int64       `json:"userId"`
+	RoleID    int64       `json:"roleId"`
+	Name      *string     `json:"name,omitempty"`
+	TTL       int         `json:"ttl"`
+	Status    TokenStatus `json:"status"`
+	CreatedAt time.Time   `json:"createdAt"`
+	UpdatedAt time.Time   `json:"updatedAt"`
+	Token     string      `json:"token"`
+}
+
 type AgentConfig struct {
 	Model             string           `json:"model"`
 	MaxTokens         *int             `json:"maxTokens,omitempty"`
@@ -47,6 +72,11 @@ type AgentPrompts struct {
 
 type AgentTestResult struct {
 	Tests []*TestResult `json:"tests"`
+}
+
+type AgentTypeUsageStats struct {
+	AgentType AgentType   `json:"agentType"`
+	Stats     *UsageStats `json:"stats"`
 }
 
 type AgentsConfig struct {
@@ -107,6 +137,26 @@ type AssistantLog struct {
 	CreatedAt    time.Time      `json:"createdAt"`
 }
 
+type CreateAPITokenInput struct {
+	Name *string `json:"name,omitempty"`
+	TTL  int     `json:"ttl"`
+}
+
+type DailyFlowsStats struct {
+	Date  time.Time   `json:"date"`
+	Stats *FlowsStats `json:"stats"`
+}
+
+type DailyToolcallsStats struct {
+	Date  time.Time       `json:"date"`
+	Stats *ToolcallsStats `json:"stats"`
+}
+
+type DailyUsageStats struct {
+	Date  time.Time   `json:"date"`
+	Stats *UsageStats `json:"stats"`
+}
+
 type DefaultPrompt struct {
 	Type      PromptType `json:"type"`
 	Template  string     `json:"template"`
@@ -142,6 +192,36 @@ type FlowAssistant struct {
 	Assistant *Assistant `json:"assistant"`
 }
 
+type FlowExecutionStats struct {
+	FlowID               int64                 `json:"flowId"`
+	FlowTitle            string                `json:"flowTitle"`
+	TotalDurationSeconds float64               `json:"totalDurationSeconds"`
+	TotalToolcallsCount  int                   `json:"totalToolcallsCount"`
+	TotalAssistantsCount int                   `json:"totalAssistantsCount"`
+	Tasks                []*TaskExecutionStats `json:"tasks"`
+}
+
+type FlowStats struct {
+	TotalTasksCount      int `json:"totalTasksCount"`
+	TotalSubtasksCount   int `json:"totalSubtasksCount"`
+	TotalAssistantsCount int `json:"totalAssistantsCount"`
+}
+
+type FlowsStats struct {
+	TotalFlowsCount      int `json:"totalFlowsCount"`
+	TotalTasksCount      int `json:"totalTasksCount"`
+	TotalSubtasksCount   int `json:"totalSubtasksCount"`
+	TotalAssistantsCount int `json:"totalAssistantsCount"`
+}
+
+type FunctionToolcallsStats struct {
+	FunctionName         string  `json:"functionName"`
+	IsAgent              bool    `json:"isAgent"`
+	TotalCount           int     `json:"totalCount"`
+	TotalDurationSeconds float64 `json:"totalDurationSeconds"`
+	AvgDurationSeconds   float64 `json:"avgDurationSeconds"`
+}
+
 type MessageLog struct {
 	ID           int64          `json:"id"`
 	Type         MessageLogType `json:"type"`
@@ -164,8 +244,16 @@ type ModelConfig struct {
 }
 
 type ModelPrice struct {
-	Input  float64 `json:"input"`
-	Output float64 `json:"output"`
+	Input      float64 `json:"input"`
+	Output     float64 `json:"output"`
+	CacheRead  float64 `json:"cacheRead"`
+	CacheWrite float64 `json:"cacheWrite"`
+}
+
+type ModelUsageStats struct {
+	Model    string      `json:"model"`
+	Provider string      `json:"provider"`
+	Stats    *UsageStats `json:"stats"`
 }
 
 type Mutation struct {
@@ -214,6 +302,11 @@ type ProviderTestResult struct {
 	Pentester    *AgentTestResult `json:"pentester"`
 }
 
+type ProviderUsageStats struct {
+	Provider string      `json:"provider"`
+	Stats    *UsageStats `json:"stats"`
+}
+
 type ProvidersConfig struct {
 	Enabled     *ProvidersReadinessStatus `json:"enabled"`
 	Default     *DefaultProvidersConfig   `json:"default"`
@@ -250,6 +343,8 @@ type ReasoningConfig struct {
 type Screenshot struct {
 	ID        int64     `json:"id"`
 	FlowID    int64     `json:"flowId"`
+	TaskID    *int64    `json:"taskId,omitempty"`
+	SubtaskID *int64    `json:"subtaskId,omitempty"`
 	Name      string    `json:"name"`
 	URL       string    `json:"url"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -289,6 +384,13 @@ type Subtask struct {
 	UpdatedAt   time.Time  `json:"updatedAt"`
 }
 
+type SubtaskExecutionStats struct {
+	SubtaskID            int64   `json:"subtaskId"`
+	SubtaskTitle         string  `json:"subtaskTitle"`
+	TotalDurationSeconds float64 `json:"totalDurationSeconds"`
+	TotalToolcallsCount  int     `json:"totalToolcallsCount"`
+}
+
 type Task struct {
 	ID        int64      `json:"id"`
 	Title     string     `json:"title"`
@@ -299,6 +401,14 @@ type Task struct {
 	Subtasks  []*Subtask `json:"subtasks,omitempty"`
 	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
+}
+
+type TaskExecutionStats struct {
+	TaskID               int64                    `json:"taskId"`
+	TaskTitle            string                   `json:"taskTitle"`
+	TotalDurationSeconds float64                  `json:"totalDurationSeconds"`
+	TotalToolcallsCount  int                      `json:"totalToolcallsCount"`
+	Subtasks             []*SubtaskExecutionStats `json:"subtasks"`
 }
 
 type Terminal struct {
@@ -313,6 +423,8 @@ type Terminal struct {
 type TerminalLog struct {
 	ID        int64           `json:"id"`
 	FlowID    int64           `json:"flowId"`
+	TaskID    *int64          `json:"taskId,omitempty"`
+	SubtaskID *int64          `json:"subtaskId,omitempty"`
 	Type      TerminalLogType `json:"type"`
 	Text      string          `json:"text"`
 	Terminal  int64           `json:"terminal"`
@@ -329,6 +441,11 @@ type TestResult struct {
 	Error     *string `json:"error,omitempty"`
 }
 
+type ToolcallsStats struct {
+	TotalCount           int     `json:"totalCount"`
+	TotalDurationSeconds float64 `json:"totalDurationSeconds"`
+}
+
 type ToolsPrompts struct {
 	GetFlowDescription       *DefaultPrompt `json:"getFlowDescription"`
 	GetTaskDescription       *DefaultPrompt `json:"getTaskDescription"`
@@ -337,6 +454,22 @@ type ToolsPrompts struct {
 	GetShortExecutionContext *DefaultPrompt `json:"getShortExecutionContext"`
 	ChooseDockerImage        *DefaultPrompt `json:"chooseDockerImage"`
 	ChooseUserLanguage       *DefaultPrompt `json:"chooseUserLanguage"`
+	CollectToolCallID        *DefaultPrompt `json:"collectToolCallID"`
+	DetectToolCallIDPattern  *DefaultPrompt `json:"detectToolCallIDPattern"`
+}
+
+type UpdateAPITokenInput struct {
+	Name   *string      `json:"name,omitempty"`
+	Status *TokenStatus `json:"status,omitempty"`
+}
+
+type UsageStats struct {
+	TotalUsageIn       int     `json:"totalUsageIn"`
+	TotalUsageOut      int     `json:"totalUsageOut"`
+	TotalUsageCacheIn  int     `json:"totalUsageCacheIn"`
+	TotalUsageCacheOut int     `json:"totalUsageCacheOut"`
+	TotalUsageCostIn   float64 `json:"totalUsageCostIn"`
+	TotalUsageCostOut  float64 `json:"totalUsageCostOut"`
 }
 
 type UserPrompt struct {
@@ -587,6 +720,8 @@ const (
 	PromptTypeExecutionLogs         PromptType = "execution_logs"
 	PromptTypeFullExecutionContext  PromptType = "full_execution_context"
 	PromptTypeShortExecutionContext PromptType = "short_execution_context"
+	PromptTypeToolCallIDCollector   PromptType = "tool_call_id_collector"
+	PromptTypeToolCallIDDetector    PromptType = "tool_call_id_detector"
 )
 
 var AllPromptType = []PromptType{
@@ -624,11 +759,13 @@ var AllPromptType = []PromptType{
 	PromptTypeExecutionLogs,
 	PromptTypeFullExecutionContext,
 	PromptTypeShortExecutionContext,
+	PromptTypeToolCallIDCollector,
+	PromptTypeToolCallIDDetector,
 }
 
 func (e PromptType) IsValid() bool {
 	switch e {
-	case PromptTypePrimaryAgent, PromptTypeAssistant, PromptTypePentester, PromptTypeQuestionPentester, PromptTypeCoder, PromptTypeQuestionCoder, PromptTypeInstaller, PromptTypeQuestionInstaller, PromptTypeSearcher, PromptTypeQuestionSearcher, PromptTypeMemorist, PromptTypeQuestionMemorist, PromptTypeAdviser, PromptTypeQuestionAdviser, PromptTypeGenerator, PromptTypeSubtasksGenerator, PromptTypeRefiner, PromptTypeSubtasksRefiner, PromptTypeReporter, PromptTypeTaskReporter, PromptTypeReflector, PromptTypeQuestionReflector, PromptTypeEnricher, PromptTypeQuestionEnricher, PromptTypeToolcallFixer, PromptTypeInputToolcallFixer, PromptTypeSummarizer, PromptTypeImageChooser, PromptTypeLanguageChooser, PromptTypeFlowDescriptor, PromptTypeTaskDescriptor, PromptTypeExecutionLogs, PromptTypeFullExecutionContext, PromptTypeShortExecutionContext:
+	case PromptTypePrimaryAgent, PromptTypeAssistant, PromptTypePentester, PromptTypeQuestionPentester, PromptTypeCoder, PromptTypeQuestionCoder, PromptTypeInstaller, PromptTypeQuestionInstaller, PromptTypeSearcher, PromptTypeQuestionSearcher, PromptTypeMemorist, PromptTypeQuestionMemorist, PromptTypeAdviser, PromptTypeQuestionAdviser, PromptTypeGenerator, PromptTypeSubtasksGenerator, PromptTypeRefiner, PromptTypeSubtasksRefiner, PromptTypeReporter, PromptTypeTaskReporter, PromptTypeReflector, PromptTypeQuestionReflector, PromptTypeEnricher, PromptTypeQuestionEnricher, PromptTypeToolcallFixer, PromptTypeInputToolcallFixer, PromptTypeSummarizer, PromptTypeImageChooser, PromptTypeLanguageChooser, PromptTypeFlowDescriptor, PromptTypeTaskDescriptor, PromptTypeExecutionLogs, PromptTypeFullExecutionContext, PromptTypeShortExecutionContext, PromptTypeToolCallIDCollector, PromptTypeToolCallIDDetector:
 		return true
 	}
 	return false
@@ -1008,6 +1145,92 @@ func (e *TerminalType) UnmarshalGQL(v interface{}) error {
 }
 
 func (e TerminalType) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+type TokenStatus string
+
+const (
+	TokenStatusActive  TokenStatus = "active"
+	TokenStatusRevoked TokenStatus = "revoked"
+	TokenStatusExpired TokenStatus = "expired"
+)
+
+var AllTokenStatus = []TokenStatus{
+	TokenStatusActive,
+	TokenStatusRevoked,
+	TokenStatusExpired,
+}
+
+func (e TokenStatus) IsValid() bool {
+	switch e {
+	case TokenStatusActive, TokenStatusRevoked, TokenStatusExpired:
+		return true
+	}
+	return false
+}
+
+func (e TokenStatus) String() string {
+	return string(e)
+}
+
+func (e *TokenStatus) UnmarshalGQL(v interface{}) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = TokenStatus(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid TokenStatus", str)
+	}
+	return nil
+}
+
+func (e TokenStatus) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+type UsageStatsPeriod string
+
+const (
+	UsageStatsPeriodWeek    UsageStatsPeriod = "week"
+	UsageStatsPeriodMonth   UsageStatsPeriod = "month"
+	UsageStatsPeriodQuarter UsageStatsPeriod = "quarter"
+)
+
+var AllUsageStatsPeriod = []UsageStatsPeriod{
+	UsageStatsPeriodWeek,
+	UsageStatsPeriodMonth,
+	UsageStatsPeriodQuarter,
+}
+
+func (e UsageStatsPeriod) IsValid() bool {
+	switch e {
+	case UsageStatsPeriodWeek, UsageStatsPeriodMonth, UsageStatsPeriodQuarter:
+		return true
+	}
+	return false
+}
+
+func (e UsageStatsPeriod) String() string {
+	return string(e)
+}
+
+func (e *UsageStatsPeriod) UnmarshalGQL(v interface{}) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = UsageStatsPeriod(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid UsageStatsPeriod", str)
+	}
+	return nil
+}
+
+func (e UsageStatsPeriod) MarshalGQL(w io.Writer) {
 	fmt.Fprint(w, strconv.Quote(e.String()))
 }
 

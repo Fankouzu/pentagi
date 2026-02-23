@@ -20,7 +20,7 @@ type roles struct {
 	Total uint64                  `json:"total"`
 }
 
-var rolesSQLMappers = map[string]interface{}{
+var rolesSQLMappers = map[string]any{
 	"id":   "{{table}}.id",
 	"name": "{{table}}.name",
 	"data": "{{table}}.name",
@@ -63,7 +63,7 @@ func (s *RoleService) GetRoles(c *gin.Context) {
 	rid := c.GetUint64("rid")
 	privs := c.GetStringSlice("prm")
 	scope := func(db *gorm.DB) *gorm.DB {
-		if !slices.Contains(privs, "roles.view'") {
+		if !slices.Contains(privs, "roles.view") {
 			return db.Where("role_id = ?", rid)
 		}
 		return db
@@ -128,7 +128,7 @@ func (s *RoleService) GetRole(c *gin.Context) {
 	rid := c.GetUint64("rid")
 	privs := c.GetStringSlice("prm")
 	scope := func(db *gorm.DB) *gorm.DB {
-		if !slices.Contains(privs, "roles.view'") {
+		if !slices.Contains(privs, "roles.view") {
 			return db.Where("role_id = ?", rid)
 		}
 		return db

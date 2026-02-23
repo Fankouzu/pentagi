@@ -6,6 +6,7 @@ package graph
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"pentagi/pkg/providers/openai"
 	"pentagi/pkg/providers/pconfig"
 	"pentagi/pkg/providers/provider"
+	"pentagi/pkg/server/auth"
 	"pentagi/pkg/templates"
 	"pentagi/pkg/templates/validator"
 	"time"
@@ -622,6 +624,190 @@ func (r *mutationResolver) DeletePrompt(ctx context.Context, promptID int64) (mo
 	return model.ResultTypeSuccess, nil
 }
 
+// CreateAPIToken is the resolver for the createAPIToken field.
+func (r *mutationResolver) CreateAPIToken(ctx context.Context, input model.CreateAPITokenInput) (*model.APITokenWithSecret, error) {
+	uid, _, err := validatePermission(ctx, "settings.tokens.create")
+	if err != nil {
+		return nil, err
+	}
+
+	isUserSession, err := validateUserType(ctx, userSessionTypes...)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isUserSession {
+		return nil, fmt.Errorf("unauthorized: non-user session is not allowed to create API tokens")
+	}
+
+	if r.Config.CookieSigningSalt == "" || r.Config.CookieSigningSalt == "salt" {
+		return nil, fmt.Errorf("token creation is disabled with default salt")
+	}
+
+	if input.TTL < 60 || input.TTL > 94608000 {
+		return nil, fmt.Errorf("invalid TTL: must be between 60 and 94608000 seconds")
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid":  uid,
+		"name": input.Name,
+		"ttl":  input.TTL,
+	}).Debug("create api token")
+
+	user, err := r.DB.GetUser(ctx, uid)
+	if err != nil {
+		return nil, err
+	}
+
+	tokenID, err := auth.GenerateTokenID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate token ID: %w", err)
+	}
+
+	claims := auth.MakeAPITokenClaims(tokenID, user.Hash, uint64(uid), uint64(user.RoleID), uint64(input.TTL))
+
+	tokenString, err := auth.MakeAPIToken(r.Config.CookieSigningSalt, claims)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create token: %w", err)
+	}
+
+	var nameStr sql.NullString
+	if input.Name != nil && *input.Name != "" {
+		nameStr = sql.NullString{String: *input.Name, Valid: true}
+	}
+
+	apiToken, err := r.DB.CreateAPIToken(ctx, database.CreateAPITokenParams{
+		TokenID: tokenID,
+		UserID:  uid,
+		RoleID:  user.RoleID,
+		Name:    nameStr,
+		Ttl:     int64(input.TTL),
+		Status:  database.TokenStatusActive,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create token in database: %w", err)
+	}
+
+	tokenWithSecret := database.APITokenWithSecret{
+		ApiToken: apiToken,
+		Token:    tokenString,
+	}
+
+	r.TokenCache.Invalidate(tokenID)
+	r.TokenCache.InvalidateUser(uint64(uid))
+
+	r.Subscriptions.NewFlowPublisher(uid, 0).APITokenCreated(ctx, tokenWithSecret)
+
+	return converter.ConvertAPITokenWithSecret(tokenWithSecret), nil
+}
+
+// UpdateAPIToken is the resolver for the updateAPIToken field.
+func (r *mutationResolver) UpdateAPIToken(ctx context.Context, tokenID string, input model.UpdateAPITokenInput) (*model.APIToken, error) {
+	uid, _, err := validatePermission(ctx, "settings.tokens.edit")
+	if err != nil {
+		return nil, err
+	}
+
+	isUserSession, err := validateUserType(ctx, userSessionTypes...)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isUserSession {
+		return nil, fmt.Errorf("unauthorized: non-user session is not allowed to update API tokens")
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid":     uid,
+		"tokenID": tokenID,
+	}).Debug("update api token")
+
+	token, err := r.DB.GetUserAPITokenByTokenID(ctx, database.GetUserAPITokenByTokenIDParams{
+		TokenID: tokenID,
+		UserID:  uid,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("token not found: %w", err)
+	}
+
+	var nameStr sql.NullString
+	if input.Name != nil {
+		if *input.Name != "" {
+			nameStr = sql.NullString{String: *input.Name, Valid: true}
+		}
+	} else {
+		nameStr = token.Name
+	}
+
+	status := token.Status
+	if input.Status != nil {
+		switch s := *input.Status; s {
+		case model.TokenStatusActive:
+			status = database.TokenStatusActive
+		case model.TokenStatusRevoked:
+			status = database.TokenStatusRevoked
+		default:
+			return nil, fmt.Errorf("invalid token status: %s", s.String())
+		}
+	}
+
+	updatedToken, err := r.DB.UpdateUserAPIToken(ctx, database.UpdateUserAPITokenParams{
+		ID:     token.ID,
+		UserID: uid,
+		Name:   nameStr,
+		Status: status,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to update token: %w", err)
+	}
+
+	if input.Status != nil {
+		r.TokenCache.Invalidate(tokenID)
+		r.TokenCache.InvalidateUser(uint64(uid))
+	}
+
+	r.Subscriptions.NewFlowPublisher(uid, 0).APITokenUpdated(ctx, updatedToken)
+
+	return converter.ConvertAPIToken(updatedToken), nil
+}
+
+// DeleteAPIToken is the resolver for the deleteAPIToken field.
+func (r *mutationResolver) DeleteAPIToken(ctx context.Context, tokenID string) (bool, error) {
+	uid, _, err := validatePermission(ctx, "settings.tokens.delete")
+	if err != nil {
+		return false, err
+	}
+
+	isUserSession, err := validateUserType(ctx, userSessionTypes...)
+	if err != nil {
+		return false, err
+	}
+
+	if !isUserSession {
+		return false, fmt.Errorf("unauthorized: non-user session is not allowed to delete API tokens")
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid":     uid,
+		"tokenID": tokenID,
+	}).Debug("delete api token")
+
+	token, err := r.DB.DeleteUserAPITokenByTokenID(ctx, database.DeleteUserAPITokenByTokenIDParams{
+		TokenID: tokenID,
+		UserID:  uid,
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to delete token: %w", err)
+	}
+
+	r.TokenCache.Invalidate(tokenID)
+	r.TokenCache.InvalidateUser(uint64(uid))
+
+	r.Subscriptions.NewFlowPublisher(uid, 0).APITokenDeleted(ctx, token)
+
+	return true, nil
+}
+
 // Providers is the resolver for the providers field.
 func (r *queryResolver) Providers(ctx context.Context) ([]*model.Provider, error) {
 	uid, _, err := validatePermission(ctx, "providers.view")
@@ -805,7 +991,7 @@ func (r *queryResolver) TerminalLogs(ctx context.Context, flowID int64) ([]*mode
 		return nil, err
 	}
 
-	return converter.ConvertTerminalLogs(logs, flowID), nil
+	return converter.ConvertTerminalLogs(logs), nil
 }
 
 // MessageLogs is the resolver for the messageLogs field.
@@ -910,6 +1096,446 @@ func (r *queryResolver) AssistantLogs(ctx context.Context, flowID int64, assista
 	}
 
 	return converter.ConvertAssistantLogs(logs), nil
+}
+
+// UsageStatsTotal is the resolver for the usageStatsTotal field.
+func (r *queryResolver) UsageStatsTotal(ctx context.Context) (*model.UsageStats, error) {
+	uid, _, err := validatePermission(ctx, "usage.view")
+	if err != nil {
+		return nil, err
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid": uid,
+	}).Debug("get total usage stats")
+
+	stats, err := r.DB.GetUserTotalUsageStats(ctx, uid)
+	if err != nil {
+		return nil, err
+	}
+
+	return converter.ConvertUsageStats(stats), nil
+}
+
+// UsageStatsByPeriod is the resolver for the usageStatsByPeriod field.
+func (r *queryResolver) UsageStatsByPeriod(ctx context.Context, period model.UsageStatsPeriod) ([]*model.DailyUsageStats, error) {
+	uid, _, err := validatePermission(ctx, "usage.view")
+	if err != nil {
+		return nil, err
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid":    uid,
+		"period": period,
+	}).Debug("get usage stats by period")
+
+	switch period {
+	case model.UsageStatsPeriodWeek:
+		stats, err := r.DB.GetUsageStatsByDayLastWeek(ctx, uid)
+		if err != nil {
+			return nil, err
+		}
+		return converter.ConvertDailyUsageStats(stats), nil
+	case model.UsageStatsPeriodMonth:
+		stats, err := r.DB.GetUsageStatsByDayLastMonth(ctx, uid)
+		if err != nil {
+			return nil, err
+		}
+		return converter.ConvertDailyUsageStatsMonth(stats), nil
+	case model.UsageStatsPeriodQuarter:
+		stats, err := r.DB.GetUsageStatsByDayLast3Months(ctx, uid)
+		if err != nil {
+			return nil, err
+		}
+		return converter.ConvertDailyUsageStatsQuarter(stats), nil
+	default:
+		return nil, fmt.Errorf("invalid period: %s", period)
+	}
+}
+
+// UsageStatsByProvider is the resolver for the usageStatsByProvider field.
+func (r *queryResolver) UsageStatsByProvider(ctx context.Context) ([]*model.ProviderUsageStats, error) {
+	uid, _, err := validatePermission(ctx, "usage.view")
+	if err != nil {
+		return nil, err
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid": uid,
+	}).Debug("get usage stats by provider")
+
+	stats, err := r.DB.GetUsageStatsByProvider(ctx, uid)
+	if err != nil {
+		return nil, err
+	}
+
+	return converter.ConvertProviderUsageStats(stats), nil
+}
+
+// UsageStatsByModel is the resolver for the usageStatsByModel field.
+func (r *queryResolver) UsageStatsByModel(ctx context.Context) ([]*model.ModelUsageStats, error) {
+	uid, _, err := validatePermission(ctx, "usage.view")
+	if err != nil {
+		return nil, err
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid": uid,
+	}).Debug("get usage stats by model")
+
+	stats, err := r.DB.GetUsageStatsByModel(ctx, uid)
+	if err != nil {
+		return nil, err
+	}
+
+	return converter.ConvertModelUsageStats(stats), nil
+}
+
+// UsageStatsByAgentType is the resolver for the usageStatsByAgentType field.
+func (r *queryResolver) UsageStatsByAgentType(ctx context.Context) ([]*model.AgentTypeUsageStats, error) {
+	uid, _, err := validatePermission(ctx, "usage.view")
+	if err != nil {
+		return nil, err
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid": uid,
+	}).Debug("get usage stats by agent type")
+
+	stats, err := r.DB.GetUsageStatsByType(ctx, uid)
+	if err != nil {
+		return nil, err
+	}
+
+	return converter.ConvertAgentTypeUsageStats(stats), nil
+}
+
+// UsageStatsByFlow is the resolver for the usageStatsByFlow field.
+func (r *queryResolver) UsageStatsByFlow(ctx context.Context, flowID int64) (*model.UsageStats, error) {
+	uid, err := validatePermissionWithFlowID(ctx, "usage.view", flowID, r.DB)
+	if err != nil {
+		return nil, err
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid":  uid,
+		"flow": flowID,
+	}).Debug("get usage stats by flow")
+
+	stats, err := r.DB.GetFlowUsageStats(ctx, flowID)
+	if err != nil {
+		return nil, err
+	}
+
+	return converter.ConvertUsageStats(stats), nil
+}
+
+// UsageStatsByAgentTypeForFlow is the resolver for the usageStatsByAgentTypeForFlow field.
+func (r *queryResolver) UsageStatsByAgentTypeForFlow(ctx context.Context, flowID int64) ([]*model.AgentTypeUsageStats, error) {
+	uid, err := validatePermissionWithFlowID(ctx, "usage.view", flowID, r.DB)
+	if err != nil {
+		return nil, err
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid":  uid,
+		"flow": flowID,
+	}).Debug("get usage stats by agent type for flow")
+
+	stats, err := r.DB.GetUsageStatsByTypeForFlow(ctx, flowID)
+	if err != nil {
+		return nil, err
+	}
+
+	return converter.ConvertAgentTypeUsageStatsForFlow(stats), nil
+}
+
+// ToolcallsStatsTotal is the resolver for the toolcallsStatsTotal field.
+func (r *queryResolver) ToolcallsStatsTotal(ctx context.Context) (*model.ToolcallsStats, error) {
+	uid, _, err := validatePermission(ctx, "usage.view")
+	if err != nil {
+		return nil, err
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid": uid,
+	}).Debug("get total toolcalls stats")
+
+	stats, err := r.DB.GetUserTotalToolcallsStats(ctx, uid)
+	if err != nil {
+		return nil, err
+	}
+
+	return converter.ConvertToolcallsStats(stats), nil
+}
+
+// ToolcallsStatsByPeriod is the resolver for the toolcallsStatsByPeriod field.
+func (r *queryResolver) ToolcallsStatsByPeriod(ctx context.Context, period model.UsageStatsPeriod) ([]*model.DailyToolcallsStats, error) {
+	uid, _, err := validatePermission(ctx, "usage.view")
+	if err != nil {
+		return nil, err
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid":    uid,
+		"period": period,
+	}).Debug("get toolcalls stats by period")
+
+	switch period {
+	case model.UsageStatsPeriodWeek:
+		stats, err := r.DB.GetToolcallsStatsByDayLastWeek(ctx, uid)
+		if err != nil {
+			return nil, err
+		}
+		return converter.ConvertDailyToolcallsStatsWeek(stats), nil
+	case model.UsageStatsPeriodMonth:
+		stats, err := r.DB.GetToolcallsStatsByDayLastMonth(ctx, uid)
+		if err != nil {
+			return nil, err
+		}
+		return converter.ConvertDailyToolcallsStatsMonth(stats), nil
+	case model.UsageStatsPeriodQuarter:
+		stats, err := r.DB.GetToolcallsStatsByDayLast3Months(ctx, uid)
+		if err != nil {
+			return nil, err
+		}
+		return converter.ConvertDailyToolcallsStatsQuarter(stats), nil
+	default:
+		return nil, fmt.Errorf("unsupported period: %s", period)
+	}
+}
+
+// ToolcallsStatsByFunction is the resolver for the toolcallsStatsByFunction field.
+func (r *queryResolver) ToolcallsStatsByFunction(ctx context.Context) ([]*model.FunctionToolcallsStats, error) {
+	uid, _, err := validatePermission(ctx, "usage.view")
+	if err != nil {
+		return nil, err
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid": uid,
+	}).Debug("get toolcalls stats by function")
+
+	stats, err := r.DB.GetToolcallsStatsByFunction(ctx, uid)
+	if err != nil {
+		return nil, err
+	}
+
+	return converter.ConvertFunctionToolcallsStats(stats), nil
+}
+
+// ToolcallsStatsByFlow is the resolver for the toolcallsStatsByFlow field.
+func (r *queryResolver) ToolcallsStatsByFlow(ctx context.Context, flowID int64) (*model.ToolcallsStats, error) {
+	uid, err := validatePermissionWithFlowID(ctx, "usage.view", flowID, r.DB)
+	if err != nil {
+		return nil, err
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid":  uid,
+		"flow": flowID,
+	}).Debug("get toolcalls stats by flow")
+
+	stats, err := r.DB.GetFlowToolcallsStats(ctx, flowID)
+	if err != nil {
+		return nil, err
+	}
+
+	return converter.ConvertToolcallsStats(stats), nil
+}
+
+// ToolcallsStatsByFunctionForFlow is the resolver for the toolcallsStatsByFunctionForFlow field.
+func (r *queryResolver) ToolcallsStatsByFunctionForFlow(ctx context.Context, flowID int64) ([]*model.FunctionToolcallsStats, error) {
+	uid, err := validatePermissionWithFlowID(ctx, "usage.view", flowID, r.DB)
+	if err != nil {
+		return nil, err
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid":  uid,
+		"flow": flowID,
+	}).Debug("get toolcalls stats by function for flow")
+
+	stats, err := r.DB.GetToolcallsStatsByFunctionForFlow(ctx, flowID)
+	if err != nil {
+		return nil, err
+	}
+
+	return converter.ConvertFunctionToolcallsStatsForFlow(stats), nil
+}
+
+// FlowsStatsTotal is the resolver for the flowsStatsTotal field.
+func (r *queryResolver) FlowsStatsTotal(ctx context.Context) (*model.FlowsStats, error) {
+	uid, _, err := validatePermission(ctx, "usage.view")
+	if err != nil {
+		return nil, err
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid": uid,
+	}).Debug("get total flows stats")
+
+	stats, err := r.DB.GetUserTotalFlowsStats(ctx, uid)
+	if err != nil {
+		return nil, err
+	}
+
+	return converter.ConvertFlowsStats(stats), nil
+}
+
+// FlowsStatsByPeriod is the resolver for the flowsStatsByPeriod field.
+func (r *queryResolver) FlowsStatsByPeriod(ctx context.Context, period model.UsageStatsPeriod) ([]*model.DailyFlowsStats, error) {
+	uid, _, err := validatePermission(ctx, "usage.view")
+	if err != nil {
+		return nil, err
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid":    uid,
+		"period": period,
+	}).Debug("get flows stats by period")
+
+	switch period {
+	case model.UsageStatsPeriodWeek:
+		stats, err := r.DB.GetFlowsStatsByDayLastWeek(ctx, uid)
+		if err != nil {
+			return nil, err
+		}
+		return converter.ConvertDailyFlowsStatsWeek(stats), nil
+	case model.UsageStatsPeriodMonth:
+		stats, err := r.DB.GetFlowsStatsByDayLastMonth(ctx, uid)
+		if err != nil {
+			return nil, err
+		}
+		return converter.ConvertDailyFlowsStatsMonth(stats), nil
+	case model.UsageStatsPeriodQuarter:
+		stats, err := r.DB.GetFlowsStatsByDayLast3Months(ctx, uid)
+		if err != nil {
+			return nil, err
+		}
+		return converter.ConvertDailyFlowsStatsQuarter(stats), nil
+	default:
+		return nil, fmt.Errorf("unsupported period: %s", period)
+	}
+}
+
+// FlowStatsByFlow is the resolver for the flowStatsByFlow field.
+func (r *queryResolver) FlowStatsByFlow(ctx context.Context, flowID int64) (*model.FlowStats, error) {
+	uid, err := validatePermissionWithFlowID(ctx, "usage.view", flowID, r.DB)
+	if err != nil {
+		return nil, err
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid":  uid,
+		"flow": flowID,
+	}).Debug("get flow stats by flow")
+
+	stats, err := r.DB.GetFlowStats(ctx, flowID)
+	if err != nil {
+		return nil, err
+	}
+
+	return converter.ConvertFlowStats(stats), nil
+}
+
+// FlowsExecutionStatsByPeriod is the resolver for the flowsExecutionStatsByPeriod field.
+func (r *queryResolver) FlowsExecutionStatsByPeriod(ctx context.Context, period model.UsageStatsPeriod) ([]*model.FlowExecutionStats, error) {
+	uid, _, err := validatePermission(ctx, "usage.view")
+	if err != nil {
+		return nil, err
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid":    uid,
+		"period": period,
+	}).Debug("get flows execution stats by period")
+
+	// Step 1: Get flows for the period
+	type flowInfo struct {
+		ID    int64
+		Title string
+	}
+	var flows []flowInfo
+
+	switch period {
+	case model.UsageStatsPeriodWeek:
+		rows, err := r.DB.GetFlowsForPeriodLastWeek(ctx, uid)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			flows = append(flows, flowInfo{ID: row.ID, Title: row.Title})
+		}
+	case model.UsageStatsPeriodMonth:
+		rows, err := r.DB.GetFlowsForPeriodLastMonth(ctx, uid)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			flows = append(flows, flowInfo{ID: row.ID, Title: row.Title})
+		}
+	case model.UsageStatsPeriodQuarter:
+		rows, err := r.DB.GetFlowsForPeriodLast3Months(ctx, uid)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			flows = append(flows, flowInfo{ID: row.ID, Title: row.Title})
+		}
+	default:
+		return nil, fmt.Errorf("unsupported period: %s", period)
+	}
+
+	// Step 2: Build stats for each flow using analytics functions
+	result := make([]*model.FlowExecutionStats, 0, len(flows))
+
+	for _, flow := range flows {
+		// Get raw data for this flow
+		tasks, err := r.DB.GetTasksForFlow(ctx, flow.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		// Collect task IDs
+		taskIDs := make([]int64, len(tasks))
+		for i, task := range tasks {
+			taskIDs[i] = task.ID
+		}
+
+		// Get subtasks for all tasks
+		var subtasks []database.GetSubtasksForTasksRow
+		if len(taskIDs) > 0 {
+			subtasks, err = r.DB.GetSubtasksForTasks(ctx, taskIDs)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		// Get msgchains for the flow
+		msgchains, err := r.DB.GetMsgchainsForFlow(ctx, flow.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		// Get toolcalls for the flow
+		toolcalls, err := r.DB.GetToolcallsForFlow(ctx, flow.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		// Get assistants count for the flow
+		assistantsCount, err := r.DB.GetAssistantsCountForFlow(ctx, flow.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		// Build execution stats using analytics functions
+		flowStats := converter.BuildFlowExecutionStats(flow.ID, flow.Title, tasks, subtasks, msgchains, toolcalls, int(assistantsCount))
+		result = append(result, flowStats)
+	}
+
+	return result, nil
 }
 
 // Settings is the resolver for the settings field.
@@ -1063,6 +1689,78 @@ func (r *queryResolver) SettingsPrompts(ctx context.Context) (*model.PromptsConf
 	}
 
 	return &promptsConfig, nil
+}
+
+// APIToken is the resolver for the apiToken field.
+func (r *queryResolver) APIToken(ctx context.Context, tokenID string) (*model.APIToken, error) {
+	uid, admin, err := validatePermission(ctx, "settings.tokens.view")
+	if err != nil {
+		return nil, err
+	}
+
+	isUserSession, err := validateUserType(ctx, userSessionTypes...)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isUserSession {
+		return nil, fmt.Errorf("unauthorized: non-user session is not allowed to get API tokens")
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid":     uid,
+		"tokenID": tokenID,
+	}).Debug("get api token")
+
+	var token database.ApiToken
+
+	if admin {
+		token, err = r.DB.GetAPITokenByTokenID(ctx, tokenID)
+	} else {
+		token, err = r.DB.GetUserAPITokenByTokenID(ctx, database.GetUserAPITokenByTokenIDParams{
+			TokenID: tokenID,
+			UserID:  uid,
+		})
+	}
+	if err != nil {
+		return nil, fmt.Errorf("token not found: %w", err)
+	}
+
+	return converter.ConvertAPIToken(token), nil
+}
+
+// APITokens is the resolver for the apiTokens field.
+func (r *queryResolver) APITokens(ctx context.Context) ([]*model.APIToken, error) {
+	uid, admin, err := validatePermission(ctx, "settings.tokens.view")
+	if err != nil {
+		return nil, err
+	}
+
+	isUserSession, err := validateUserType(ctx, userSessionTypes...)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isUserSession {
+		return nil, fmt.Errorf("unauthorized: non-user session is not allowed to get API tokens")
+	}
+
+	r.Logger.WithFields(logrus.Fields{
+		"uid": uid,
+	}).Debug("get api tokens")
+
+	var tokens []database.ApiToken
+
+	if admin {
+		tokens, err = r.DB.GetAPITokens(ctx)
+	} else {
+		tokens, err = r.DB.GetUserAPITokens(ctx, uid)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tokens: %w", err)
+	}
+
+	return converter.ConvertAPITokens(tokens), nil
 }
 
 // FlowCreated is the resolver for the flowCreated field.
@@ -1278,6 +1976,63 @@ func (r *subscriptionResolver) ProviderDeleted(ctx context.Context) (<-chan *mod
 	}
 
 	return r.Subscriptions.NewFlowSubscriber(uid, 0).ProviderDeleted(ctx)
+}
+
+// APITokenCreated is the resolver for the apiTokenCreated field.
+func (r *subscriptionResolver) APITokenCreated(ctx context.Context) (<-chan *model.APIToken, error) {
+	uid, _, err := validatePermission(ctx, "settings.tokens.subscribe")
+	if err != nil {
+		return nil, err
+	}
+
+	isUserSession, err := validateUserType(ctx, userSessionTypes...)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isUserSession {
+		return nil, fmt.Errorf("unauthorized: non-user session is not allowed to subscribe to API tokens")
+	}
+
+	return r.Subscriptions.NewFlowSubscriber(uid, 0).APITokenCreated(ctx)
+}
+
+// APITokenUpdated is the resolver for the apiTokenUpdated field.
+func (r *subscriptionResolver) APITokenUpdated(ctx context.Context) (<-chan *model.APIToken, error) {
+	uid, _, err := validatePermission(ctx, "settings.tokens.subscribe")
+	if err != nil {
+		return nil, err
+	}
+
+	isUserSession, err := validateUserType(ctx, userSessionTypes...)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isUserSession {
+		return nil, fmt.Errorf("unauthorized: non-user session is not allowed to subscribe to API tokens")
+	}
+
+	return r.Subscriptions.NewFlowSubscriber(uid, 0).APITokenUpdated(ctx)
+}
+
+// APITokenDeleted is the resolver for the apiTokenDeleted field.
+func (r *subscriptionResolver) APITokenDeleted(ctx context.Context) (<-chan *model.APIToken, error) {
+	uid, _, err := validatePermission(ctx, "settings.tokens.subscribe")
+	if err != nil {
+		return nil, err
+	}
+
+	isUserSession, err := validateUserType(ctx, userSessionTypes...)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isUserSession {
+		return nil, fmt.Errorf("unauthorized: non-user session is not allowed to subscribe to API tokens")
+	}
+
+	return r.Subscriptions.NewFlowSubscriber(uid, 0).APITokenDeleted(ctx)
 }
 
 // Mutation returns MutationResolver implementation.
